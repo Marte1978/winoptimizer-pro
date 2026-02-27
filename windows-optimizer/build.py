@@ -116,6 +116,8 @@ def build(one_file: bool = True, debug: bool = False) -> None:
         "--hidden-import", "PIL",
         "--hidden-import", "PIL._tkinter_finder",
         "--hidden-import", "winreg",
+        "--hidden-import", "psutil",
+        "--collect-all", "psutil",
         "--add-data", "optimizer;optimizer",
         "--add-data", "utils;utils",
     ]
