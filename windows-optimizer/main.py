@@ -165,9 +165,22 @@ class WinOptimizerApp(ctk.CTk):
         sidebar.grid(row=0, column=0, rowspan=2, sticky="nsew")
         sidebar.grid_propagate(False)
         sidebar.grid_columnconfigure(0, weight=1)
+        sidebar.grid_rowconfigure(0, weight=1)
+
+        # Contenedor scrollable para todo el contenido del sidebar
+        scroll_frame = ctk.CTkScrollableFrame(
+            sidebar,
+            fg_color="#111827",
+            corner_radius=0,
+            scrollbar_button_color="#4a5568",
+            scrollbar_button_hover_color=COLOR_ACCENT,
+            scrollbar_fg_color="#1a202c",
+        )
+        scroll_frame.grid(row=0, column=0, sticky="nsew")
+        scroll_frame.grid_columnconfigure(0, weight=1)
 
         # Logo / título
-        logo_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
+        logo_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
         logo_frame.grid(row=0, column=0, padx=16, pady=(20, 8), sticky="ew")
 
         ctk.CTkLabel(
@@ -187,7 +200,7 @@ class WinOptimizerApp(ctk.CTk):
         win_ver = self.system_info.get("product_name", "Windows")
         ram = self.system_info.get("ram_gb", 0)
         build = self.system_info.get("build", 0)
-        info_frame = ctk.CTkFrame(sidebar, fg_color="#1f2937", corner_radius=8)
+        info_frame = ctk.CTkFrame(scroll_frame, fg_color="#1f2937", corner_radius=8)
         info_frame.grid(row=1, column=0, padx=12, pady=(0, 12), sticky="ew")
 
         ctk.CTkLabel(
@@ -213,7 +226,7 @@ class WinOptimizerApp(ctk.CTk):
             ).pack(anchor="w", padx=10, pady=(0, 6))
 
         # Separador
-        ctk.CTkFrame(sidebar, height=1, fg_color=COLOR_BORDER).grid(
+        ctk.CTkFrame(scroll_frame, height=1, fg_color=COLOR_BORDER).grid(
             row=2, column=0, padx=12, pady=4, sticky="ew"
         )
 
@@ -232,7 +245,7 @@ class WinOptimizerApp(ctk.CTk):
             ("ai", "🤖  Asistente IA", "Recomendaciones con inteligencia artificial"),
         ]
 
-        nav_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
+        nav_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
         nav_frame.grid(row=3, column=0, padx=8, pady=4, sticky="ew")
 
         for i, (section_id, label, tooltip) in enumerate(nav_items):
@@ -253,11 +266,11 @@ class WinOptimizerApp(ctk.CTk):
             self._nav_buttons[section_id] = btn
 
         # Botones de acción en la parte inferior
-        ctk.CTkFrame(sidebar, height=1, fg_color=COLOR_BORDER).grid(
+        ctk.CTkFrame(scroll_frame, height=1, fg_color=COLOR_BORDER).grid(
             row=4, column=0, padx=12, pady=4, sticky="ew"
         )
 
-        action_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
+        action_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
         action_frame.grid(row=5, column=0, padx=8, pady=8, sticky="ew")
         action_frame.grid_columnconfigure(0, weight=1)
 
@@ -296,7 +309,7 @@ class WinOptimizerApp(ctk.CTk):
             text_color=COLOR_TEXT,
             height=36,
             command=self._revert_changes_thread,
-        ).grid(row=2, column=0, padx=4, pady=3, sticky="ew")
+        ).grid(row=2, column=0, padx=4, pady=(3, 16), sticky="ew")
 
     # ─── ÁREA PRINCIPAL ───────────────────────────────────────────────────────
 
