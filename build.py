@@ -121,13 +121,13 @@ def build(one_file: bool = True, debug: bool = False) -> None:
     if result.returncode == 0:
         exe_path = _find_output_exe(one_file)
         print(f"\n{'='*60}")
-        print(f"✅ Compilación exitosa!")
+        print(f"[OK] Compilacion exitosa!")
         print(f"   Ejecutable: {exe_path}")
-        print(f"   Tamaño: {_file_size_mb(exe_path):.1f} MB")
+        print(f"   Tamano: {_file_size_mb(exe_path):.1f} MB")
         print(f"{'='*60}")
         _show_run_instructions(exe_path)
     else:
-        print(f"\n❌ Error en la compilación (código {result.returncode})")
+        print(f"\n[ERROR] Error en la compilacion (codigo {result.returncode})")
         sys.exit(1)
 
     # Limpiar archivo de versión temporal
@@ -195,13 +195,13 @@ def _file_size_mb(path: str) -> float:
 
 def _show_run_instructions(exe_path: str) -> None:
     print(f"""
-📌 Instrucciones de ejecución:
+[!] Instrucciones de ejecucion:
 
    1. Clic derecho en {Path(exe_path).name}
    2. Seleccionar "Ejecutar como administrador"
    3. Aceptar el aviso de UAC
 
-   ⚠️  El programa REQUIERE privilegios de administrador
+   IMPORTANTE: El programa REQUIERE privilegios de administrador
       para modificar servicios y el registro de Windows.
 """)
 
