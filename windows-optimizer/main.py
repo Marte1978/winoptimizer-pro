@@ -1,0 +1,1259 @@
+"""
+WinOptimizer Pro v1.0
+Optimizador de rendimiento para Windows 10 y Windows 11.
+
+Desarrollado con SaaS Factory V3 methodology.
+Stack: Python 3.10+ | CustomTkinter | PowerShell Engine
+"""
+import sys
+import os
+import threading
+import logging
+from datetime import datetime
+from typing import Optional
+
+# Verificar Python 3.10+
+if sys.version_info < (3, 10):
+    import tkinter as tk
+    import tkinter.messagebox as mb
+    root = tk.Tk()
+    root.withdraw()
+    mb.showerror("Error", "WinOptimizer Pro requiere Python 3.10 o superior.")
+    sys.exit(1)
+
+import customtkinter as ctk
+from tkinter import messagebox
+
+# Configurar CustomTkinter
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+# Imports locales
+from utils.admin import is_admin, request_admin
+from utils.logger import setup_logger, ChangeTracker
+from utils.compatibility import get_system_summary
+from optimizer.backup import BackupManager
+from optimizer.services import ServicesOptimizer, SAFE_SERVICES_TO_DISABLE
+from optimizer.registry import RegistryOptimizer, REGISTRY_TWEAKS
+from optimizer.power import PowerOptimizer
+from optimizer.cleanup import DiskCleaner
+from optimizer.network import NetworkOptimizer
+from optimizer.visual import VisualOptimizer
+
+logger = setup_logger("WinOptimizer")
+
+# ─── Constantes de diseño ────────────────────────────────────────────────────
+COLOR_BG = "#0f0f0f"
+COLOR_CARD = "#1a1a2e"
+COLOR_ACCENT = "#00d4aa"
+COLOR_ACCENT2 = "#3b82f6"
+COLOR_DANGER = "#ef4444"
+COLOR_WARNING = "#f59e0b"
+COLOR_SUCCESS = "#10b981"
+COLOR_TEXT = "#e2e8f0"
+COLOR_MUTED = "#94a3b8"
+COLOR_BORDER = "#2d3748"
+FONT_TITLE = ("Segoe UI", 22, "bold")
+FONT_HEADING = ("Segoe UI", 14, "bold")
+FONT_BODY = ("Segoe UI", 11)
+FONT_SMALL = ("Segoe UI", 9)
+FONT_CODE = ("Consolas", 10)
+
+APP_VERSION = "1.0.0"
+APP_NAME = "WinOptimizer Pro"
+
+
+class WinOptimizerApp(ctk.CTk):
+    """Aplicación principal del optimizador de Windows."""
+
+    def __init__(self):
+        super().__init__()
+
+        # Inicializar componentes
+        self.tracker = ChangeTracker()
+        self.system_info = get_system_summary()
+        self.is_laptop = self._detect_laptop()
+        self._current_section = "dashboard"
+        self._optimization_running = False
+        self._backup_created = False
+        self._backup_data: Optional[dict] = None
+        self._progress_var = ctk.DoubleVar(value=0)
+        self._status_var = ctk.StringVar(value="Listo")
+        self._checkboxes: dict[str, ctk.CTkCheckBox] = {}
+        self._section_frames: dict[str, ctk.CTkFrame] = {}
+        self._nav_buttons: dict[str, ctk.CTkButton] = {}
+
+        # Inicializar optimizadores
+        def make_progress(msg, pct):
+            self._update_progress(msg, pct)
+
+        self.backup_mgr = BackupManager(progress_callback=make_progress)
+        self.svc_opt = ServicesOptimizer(self.tracker, make_progress)
+        self.reg_opt = RegistryOptimizer(self.tracker, make_progress)
+        self.pwr_opt = PowerOptimizer(self.tracker, make_progress)
+        self.clean_opt = DiskCleaner(self.tracker, make_progress)
+        self.net_opt = NetworkOptimizer(self.tracker, make_progress)
+        self.vis_opt = VisualOptimizer(self.tracker, make_progress)
+
+        # Configurar ventana
+        self._setup_window()
+        self._build_ui()
+        self._show_section("dashboard")
+
+    def _detect_laptop(self) -> bool:
+        """Detecta si el equipo es una laptop."""
+        try:
+            from optimizer.core import PowerShellRunner
+            ps = PowerShellRunner()
+            ok, out, _ = ps.run(
+                "(Get-WmiObject -Class Win32_Battery -ErrorAction SilentlyContinue) -ne $null"
+            )
+            return ok and "True" in out
+        except Exception:
+            return False
+
+    def _setup_window(self) -> None:
+        self.title(f"{APP_NAME} v{APP_VERSION}")
+        self.geometry("1100x720")
+        self.minsize(960, 640)
+        self.configure(fg_color=COLOR_BG)
+
+        # Centrar en pantalla
+        self.update_idletasks()
+        w = self.winfo_width()
+        h = self.winfo_height()
+        x = (self.winfo_screenwidth() - w) // 2
+        y = (self.winfo_screenheight() - h) // 2
+        self.geometry(f"+{x}+{y}")
+
+        # Icono
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.ico")
+            if os.path.exists(icon_path):
+                self.iconbitmap(icon_path)
+        except Exception:
+            pass
+
+    def _build_ui(self) -> None:
+        """Construye toda la interfaz de usuario."""
+        # Layout principal: sidebar + contenido
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        self._build_sidebar()
+        self._build_main_area()
+        self._build_status_bar()
+
+    # ─── SIDEBAR ─────────────────────────────────────────────────────────────
+
+    def _build_sidebar(self) -> None:
+        sidebar = ctk.CTkFrame(self, fg_color="#111827", width=220, corner_radius=0)
+        sidebar.grid(row=0, column=0, rowspan=2, sticky="nsew")
+        sidebar.grid_propagate(False)
+        sidebar.grid_columnconfigure(0, weight=1)
+
+        # Logo / título
+        logo_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
+        logo_frame.grid(row=0, column=0, padx=16, pady=(20, 8), sticky="ew")
+
+        ctk.CTkLabel(
+            logo_frame,
+            text="⚡ WinOptimizer",
+            font=("Segoe UI", 16, "bold"),
+            text_color=COLOR_ACCENT,
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            logo_frame,
+            text=f"Pro v{APP_VERSION}",
+            font=FONT_SMALL,
+            text_color=COLOR_MUTED,
+        ).pack(anchor="w")
+
+        # Sistema info rápida
+        win_ver = self.system_info.get("product_name", "Windows")
+        ram = self.system_info.get("ram_gb", 0)
+        build = self.system_info.get("build", 0)
+        info_frame = ctk.CTkFrame(sidebar, fg_color="#1f2937", corner_radius=8)
+        info_frame.grid(row=1, column=0, padx=12, pady=(0, 12), sticky="ew")
+
+        ctk.CTkLabel(
+            info_frame,
+            text=f"🖥  {win_ver}",
+            font=FONT_SMALL,
+            text_color=COLOR_TEXT,
+            wraplength=180,
+        ).pack(anchor="w", padx=10, pady=(6, 2))
+        ctk.CTkLabel(
+            info_frame,
+            text=f"🔧 Build {build}  |  💾 {ram} GB RAM",
+            font=FONT_SMALL,
+            text_color=COLOR_MUTED,
+        ).pack(anchor="w", padx=10, pady=(0, 6))
+
+        if self.is_laptop:
+            ctk.CTkLabel(
+                info_frame,
+                text="💻 Laptop detectada",
+                font=FONT_SMALL,
+                text_color=COLOR_WARNING,
+            ).pack(anchor="w", padx=10, pady=(0, 6))
+
+        # Separador
+        ctk.CTkFrame(sidebar, height=1, fg_color=COLOR_BORDER).grid(
+            row=2, column=0, padx=12, pady=4, sticky="ew"
+        )
+
+        # Navegación
+        nav_items = [
+            ("dashboard", "🏠  Dashboard", "Vista general del sistema"),
+            ("services", "⚙️  Servicios", "Gestionar servicios de Windows"),
+            ("registry", "🔧  Registro", "Tweaks del registro"),
+            ("power", "⚡  Energía", "Plan de energía y CPU"),
+            ("cleanup", "🧹  Limpieza", "Archivos temporales y caché"),
+            ("network", "🌐  Red", "Optimización de red y TCP"),
+            ("visual", "👁  Visual", "Efectos visuales"),
+            ("log", "📋  Registro", "Historial de cambios"),
+        ]
+
+        nav_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
+        nav_frame.grid(row=3, column=0, padx=8, pady=4, sticky="ew")
+
+        for i, (section_id, label, tooltip) in enumerate(nav_items):
+            btn = ctk.CTkButton(
+                nav_frame,
+                text=label,
+                font=FONT_BODY,
+                fg_color="transparent",
+                hover_color="#1f2937",
+                text_color=COLOR_MUTED,
+                anchor="w",
+                height=36,
+                corner_radius=6,
+                command=lambda s=section_id: self._show_section(s),
+            )
+            btn.grid(row=i, column=0, padx=4, pady=2, sticky="ew")
+            nav_frame.grid_columnconfigure(0, weight=1)
+            self._nav_buttons[section_id] = btn
+
+        # Botones de acción en la parte inferior
+        ctk.CTkFrame(sidebar, height=1, fg_color=COLOR_BORDER).grid(
+            row=4, column=0, padx=12, pady=4, sticky="ew"
+        )
+
+        action_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
+        action_frame.grid(row=5, column=0, padx=8, pady=8, sticky="ew")
+        action_frame.grid_columnconfigure(0, weight=1)
+
+        # Botón Backup
+        ctk.CTkButton(
+            action_frame,
+            text="🛡  Crear Backup",
+            font=FONT_BODY,
+            fg_color="#1e3a5f",
+            hover_color="#1e4d7b",
+            text_color=COLOR_TEXT,
+            height=36,
+            command=self._create_backup_thread,
+        ).grid(row=0, column=0, padx=4, pady=3, sticky="ew")
+
+        # Botón Aplicar Todo
+        self._apply_btn = ctk.CTkButton(
+            action_frame,
+            text="🚀  Aplicar Todo",
+            font=("Segoe UI", 12, "bold"),
+            fg_color=COLOR_ACCENT,
+            hover_color="#00b894",
+            text_color="#000000",
+            height=42,
+            command=self._apply_all_thread,
+        )
+        self._apply_btn.grid(row=1, column=0, padx=4, pady=3, sticky="ew")
+
+        # Botón Revertir
+        ctk.CTkButton(
+            action_frame,
+            text="↩  Revertir Cambios",
+            font=FONT_BODY,
+            fg_color="#7c2d12",
+            hover_color="#991b1b",
+            text_color=COLOR_TEXT,
+            height=36,
+            command=self._revert_changes_thread,
+        ).grid(row=2, column=0, padx=4, pady=3, sticky="ew")
+
+    # ─── ÁREA PRINCIPAL ───────────────────────────────────────────────────────
+
+    def _build_main_area(self) -> None:
+        self._main_frame = ctk.CTkFrame(self, fg_color=COLOR_BG, corner_radius=0)
+        self._main_frame.grid(row=0, column=1, sticky="nsew", padx=0, pady=0)
+        self._main_frame.grid_columnconfigure(0, weight=1)
+        self._main_frame.grid_rowconfigure(1, weight=1)
+
+        # Header con título de sección
+        self._header_frame = ctk.CTkFrame(
+            self._main_frame, fg_color="#111827", height=60, corner_radius=0
+        )
+        self._header_frame.grid(row=0, column=0, sticky="ew")
+        self._header_frame.grid_propagate(False)
+
+        self._section_title = ctk.CTkLabel(
+            self._header_frame,
+            text="Dashboard",
+            font=FONT_TITLE,
+            text_color=COLOR_TEXT,
+        )
+        self._section_title.pack(side="left", padx=24, pady=10)
+
+        # Contenedor de secciones (stack de frames)
+        self._content_area = ctk.CTkFrame(
+            self._main_frame, fg_color=COLOR_BG, corner_radius=0
+        )
+        self._content_area.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+        self._content_area.grid_columnconfigure(0, weight=1)
+        self._content_area.grid_rowconfigure(0, weight=1)
+
+        # Construir todas las secciones
+        self._build_dashboard()
+        self._build_services_section()
+        self._build_registry_section()
+        self._build_power_section()
+        self._build_cleanup_section()
+        self._build_network_section()
+        self._build_visual_section()
+        self._build_log_section()
+
+    def _build_status_bar(self) -> None:
+        """Barra de estado inferior con barra de progreso."""
+        status_bar = ctk.CTkFrame(self, fg_color="#111827", height=50, corner_radius=0)
+        status_bar.grid(row=1, column=1, sticky="ew")
+        status_bar.grid_propagate(False)
+        status_bar.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            status_bar,
+            textvariable=self._status_var,
+            font=FONT_BODY,
+            text_color=COLOR_MUTED,
+        ).grid(row=0, column=0, padx=16, pady=10, sticky="w")
+
+        self._progress_bar = ctk.CTkProgressBar(
+            status_bar,
+            variable=self._progress_var,
+            progress_color=COLOR_ACCENT,
+            fg_color=COLOR_BORDER,
+            width=300,
+        )
+        self._progress_bar.grid(row=0, column=1, padx=16, sticky="e")
+        self._progress_bar.set(0)
+
+    # ─── SECCIONES ────────────────────────────────────────────────────────────
+
+    def _make_section_frame(self, name: str) -> ctk.CTkScrollableFrame:
+        """Crea un frame de sección scrollable."""
+        frame = ctk.CTkScrollableFrame(
+            self._content_area,
+            fg_color=COLOR_BG,
+            scrollbar_button_color=COLOR_BORDER,
+            corner_radius=0,
+        )
+        frame.grid(row=0, column=0, sticky="nsew")
+        frame.grid_columnconfigure(0, weight=1)
+        self._section_frames[name] = frame
+        return frame
+
+    def _build_dashboard(self) -> None:
+        frame = self._make_section_frame("dashboard")
+
+        # Título de bienvenida
+        welcome = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=12)
+        welcome.grid(row=0, column=0, padx=20, pady=(20, 10), sticky="ew")
+
+        ctk.CTkLabel(
+            welcome,
+            text=f"⚡ Bienvenido a {APP_NAME}",
+            font=FONT_TITLE,
+            text_color=COLOR_ACCENT,
+        ).pack(anchor="w", padx=20, pady=(16, 4))
+        ctk.CTkLabel(
+            welcome,
+            text=(
+                "Optimiza tu PC con Windows en un solo clic. "
+                "Siempre crea un punto de restauración antes de aplicar cambios."
+            ),
+            font=FONT_BODY,
+            text_color=COLOR_MUTED,
+            wraplength=700,
+        ).pack(anchor="w", padx=20, pady=(0, 16))
+
+        # Tarjetas de información del sistema
+        cards_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        cards_frame.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
+        cards_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
+
+        cards_data = [
+            ("🖥", "Sistema", self.system_info.get("product_name", "Windows"), COLOR_ACCENT2),
+            ("💾", "RAM Total", f"{self.system_info.get('ram_gb', 0)} GB", COLOR_ACCENT),
+            ("💿", "SSD", "Detectado" if self.system_info.get("has_ssd") else "HDD", COLOR_SUCCESS),
+            ("🏗", "Build", str(self.system_info.get("build", 0)), COLOR_WARNING),
+        ]
+
+        for col, (icon, title, value, color) in enumerate(cards_data):
+            card = ctk.CTkFrame(cards_frame, fg_color=COLOR_CARD, corner_radius=10)
+            card.grid(row=0, column=col, padx=6, pady=4, sticky="ew")
+
+            ctk.CTkLabel(card, text=icon, font=("Segoe UI", 24)).pack(pady=(12, 4))
+            ctk.CTkLabel(card, text=title, font=FONT_SMALL, text_color=COLOR_MUTED).pack()
+            ctk.CTkLabel(card, text=value, font=("Segoe UI", 12, "bold"),
+                        text_color=color, wraplength=150).pack(pady=(0, 12))
+
+        # Advertencias / recomendaciones
+        warn_frame = ctk.CTkFrame(frame, fg_color="#1a1a0a", corner_radius=10,
+                                   border_width=1, border_color=COLOR_WARNING)
+        warn_frame.grid(row=2, column=0, padx=20, pady=10, sticky="ew")
+
+        ctk.CTkLabel(
+            warn_frame,
+            text="⚠️  Recomendaciones antes de optimizar:",
+            font=("Segoe UI", 12, "bold"),
+            text_color=COLOR_WARNING,
+        ).pack(anchor="w", padx=16, pady=(12, 4))
+
+        warnings = [
+            "1. Haz clic en '🛡 Crear Backup' para crear un punto de restauración del sistema.",
+            "2. Cierra todas las aplicaciones importantes antes de aplicar cambios.",
+            "3. Revisa cada sección y desmarca las optimizaciones que no desees aplicar.",
+            "4. Reinicia el equipo después de aplicar las optimizaciones para que surtan efecto.",
+        ]
+        if self.is_laptop:
+            warnings.append(
+                "5. ⚡ Laptop detectada: el plan 'Ultimate Performance' NO se aplicará "
+                "(consume más batería). Se usará 'High Performance'."
+            )
+
+        for w_text in warnings:
+            ctk.CTkLabel(
+                warn_frame,
+                text=w_text,
+                font=FONT_BODY,
+                text_color=COLOR_TEXT,
+                wraplength=680,
+                justify="left",
+            ).pack(anchor="w", padx=20, pady=2)
+        ctk.CTkLabel(warn_frame, text="").pack(pady=4)  # Espaciado inferior
+
+        # Resumen de optimizaciones disponibles
+        summary_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        summary_frame.grid(row=3, column=0, padx=20, pady=10, sticky="ew")
+
+        ctk.CTkLabel(
+            summary_frame,
+            text="📊 Optimizaciones Disponibles",
+            font=FONT_HEADING,
+            text_color=COLOR_TEXT,
+        ).pack(anchor="w", padx=16, pady=(12, 8))
+
+        summary_items = [
+            ("⚙️  Servicios", f"{len(SAFE_SERVICES_TO_DISABLE)} servicios innecesarios a deshabilitar"),
+            ("🔧  Registro", f"{len(REGISTRY_TWEAKS)} tweaks de rendimiento y gaming"),
+            ("⚡  Energía", "Plan Ultimate Performance + configuración CPU"),
+            ("🧹  Limpieza", "Temporales, caché Windows Update, WinSxS"),
+            ("🌐  Red", "Algoritmo de Nagle, TCP, Network Throttling"),
+            ("👁   Visual", "Animaciones, transparencia, efectos visuales"),
+        ]
+
+        for icon_text, desc in summary_items:
+            row = ctk.CTkFrame(summary_frame, fg_color="transparent")
+            row.pack(fill="x", padx=16, pady=3)
+            ctk.CTkLabel(row, text=icon_text, font=FONT_BODY, text_color=COLOR_ACCENT,
+                        width=120, anchor="w").pack(side="left")
+            ctk.CTkLabel(row, text=desc, font=FONT_BODY, text_color=COLOR_MUTED,
+                        anchor="w").pack(side="left", padx=8)
+
+        ctk.CTkLabel(summary_frame, text="").pack(pady=4)
+
+    def _build_services_section(self) -> None:
+        frame = self._make_section_frame("services")
+
+        ctk.CTkLabel(
+            frame,
+            text=(
+                "Selecciona los servicios que deseas deshabilitar. "
+                "Todos los servicios listados son seguros de deshabilitar según el uso de tu PC."
+            ),
+            font=FONT_BODY,
+            text_color=COLOR_MUTED,
+            wraplength=700,
+        ).grid(row=0, column=0, padx=20, pady=(16, 8), sticky="w")
+
+        is_win11 = self.system_info.get("is_win11", False)
+        services = self.svc_opt.get_available_services(is_win11)
+
+        # Agrupar por categoría
+        categories: dict[str, list] = {}
+        for svc in services:
+            cat = svc.get("category", "other")
+            categories.setdefault(cat, []).append(svc)
+
+        CAT_NAMES = {
+            "performance": "🚀 Rendimiento",
+            "network": "🌐 Red",
+            "hardware": "🔌 Hardware",
+            "connectivity": "📡 Conectividad",
+            "privacy": "🔒 Privacidad",
+            "media": "🎵 Multimedia",
+            "bloatware": "🗑  Bloatware",
+            "gaming": "🎮 Gaming",
+            "diagnostics": "🔍 Diagnóstico",
+        }
+
+        row_idx = 1
+        for cat, svcs in categories.items():
+            cat_name = CAT_NAMES.get(cat, cat.title())
+            cat_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+            cat_frame.grid(row=row_idx, column=0, padx=20, pady=6, sticky="ew")
+            cat_frame.grid_columnconfigure(0, weight=1)
+            row_idx += 1
+
+            ctk.CTkLabel(
+                cat_frame, text=cat_name, font=FONT_HEADING, text_color=COLOR_TEXT
+            ).grid(row=0, column=0, padx=16, pady=(12, 6), sticky="w")
+
+            for j, svc in enumerate(svcs):
+                svc_row = ctk.CTkFrame(cat_frame, fg_color="transparent")
+                svc_row.grid(row=j + 1, column=0, padx=16, pady=3, sticky="ew")
+                svc_row.grid_columnconfigure(1, weight=1)
+
+                cb_var = ctk.BooleanVar(value=True)
+                cb = ctk.CTkCheckBox(
+                    svc_row,
+                    text="",
+                    variable=cb_var,
+                    checkbox_width=18,
+                    checkbox_height=18,
+                    checkmark_color="#000000",
+                    fg_color=COLOR_ACCENT,
+                    border_color=COLOR_BORDER,
+                )
+                cb.grid(row=0, column=0, padx=(0, 8))
+                self._checkboxes[f"svc_{svc['name']}"] = cb
+
+                ctk.CTkLabel(
+                    svc_row,
+                    text=svc["display"],
+                    font=("Segoe UI", 11, "bold"),
+                    text_color=COLOR_TEXT,
+                    anchor="w",
+                ).grid(row=0, column=1, sticky="w")
+
+                risk_colors = {"low": COLOR_SUCCESS, "medium": COLOR_WARNING, "high": COLOR_DANGER}
+                risk_text = {"low": "Riesgo bajo", "medium": "Riesgo medio", "high": "Riesgo alto"}
+                risk_lvl = svc.get("risk", "low")
+                ctk.CTkLabel(
+                    svc_row,
+                    text=risk_text.get(risk_lvl, ""),
+                    font=FONT_SMALL,
+                    text_color=risk_colors.get(risk_lvl, COLOR_MUTED),
+                ).grid(row=0, column=2, padx=8)
+
+                ctk.CTkLabel(
+                    svc_row,
+                    text=svc["description"],
+                    font=FONT_SMALL,
+                    text_color=COLOR_MUTED,
+                    anchor="w",
+                    wraplength=500,
+                ).grid(row=1, column=1, columnspan=2, sticky="w")
+
+            ctk.CTkLabel(cat_frame, text="").grid(row=row_idx + 100, padx=0, pady=4)
+
+    def _build_registry_section(self) -> None:
+        frame = self._make_section_frame("registry")
+
+        ctk.CTkLabel(
+            frame,
+            text=(
+                "Tweaks del registro de Windows. Cada cambio tiene una descripción clara, "
+                "nivel de riesgo y puede revertirse. Un punto de restauración se creará automáticamente."
+            ),
+            font=FONT_BODY,
+            text_color=COLOR_MUTED,
+            wraplength=700,
+        ).grid(row=0, column=0, padx=20, pady=(16, 8), sticky="w")
+
+        categories: dict[str, list] = {}
+        for tweak in REGISTRY_TWEAKS:
+            cat = tweak.get("category", "other")
+            categories.setdefault(cat, []).append(tweak)
+
+        CAT_NAMES = {
+            "performance": "🚀 Rendimiento General",
+            "startup": "⚡ Inicio del Sistema",
+            "gaming": "🎮 Gaming y Multimedia",
+            "network": "🌐 Red",
+            "visual": "👁  Visual",
+            "ui": "🖥  Interfaz de Usuario",
+        }
+
+        row_idx = 1
+        for cat, tweaks in categories.items():
+            cat_name = CAT_NAMES.get(cat, cat.title())
+            cat_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+            cat_frame.grid(row=row_idx, column=0, padx=20, pady=6, sticky="ew")
+            cat_frame.grid_columnconfigure(0, weight=1)
+            row_idx += 1
+
+            ctk.CTkLabel(
+                cat_frame, text=cat_name, font=FONT_HEADING, text_color=COLOR_TEXT
+            ).grid(row=0, column=0, padx=16, pady=(12, 6), sticky="w")
+
+            for j, tweak in enumerate(tweaks):
+                t_row = ctk.CTkFrame(cat_frame, fg_color="transparent")
+                t_row.grid(row=j + 1, column=0, padx=16, pady=4, sticky="ew")
+                t_row.grid_columnconfigure(1, weight=1)
+
+                cb_var = ctk.BooleanVar(value=True)
+                cb = ctk.CTkCheckBox(
+                    t_row, text="", variable=cb_var,
+                    checkbox_width=18, checkbox_height=18,
+                    checkmark_color="#000000", fg_color=COLOR_ACCENT,
+                    border_color=COLOR_BORDER,
+                )
+                cb.grid(row=0, column=0, padx=(0, 8))
+                self._checkboxes[f"reg_{tweak['id']}"] = cb
+
+                ctk.CTkLabel(
+                    t_row, text=tweak["name"],
+                    font=("Segoe UI", 11, "bold"), text_color=COLOR_TEXT, anchor="w",
+                ).grid(row=0, column=1, sticky="w")
+
+                risk_colors = {"low": COLOR_SUCCESS, "medium": COLOR_WARNING}
+                ctk.CTkLabel(
+                    t_row,
+                    text=f"Riesgo {tweak.get('risk', 'bajo')}",
+                    font=FONT_SMALL,
+                    text_color=risk_colors.get(tweak.get("risk", "low"), COLOR_MUTED),
+                ).grid(row=0, column=2, padx=8)
+
+                ctk.CTkLabel(
+                    t_row, text=tweak["description"],
+                    font=FONT_SMALL, text_color=COLOR_MUTED, anchor="w", wraplength=550,
+                ).grid(row=1, column=1, columnspan=2, sticky="w")
+
+                # Mostrar la ruta del registro
+                reg_path = f"{tweak['hive']}\\{tweak['path']}\\{tweak['name_key']} = {tweak['value']}"
+                ctk.CTkLabel(
+                    t_row, text=reg_path,
+                    font=FONT_CODE, text_color="#64748b", anchor="w", wraplength=550,
+                ).grid(row=2, column=1, columnspan=2, sticky="w", pady=(0, 4))
+
+            ctk.CTkLabel(cat_frame, text="").grid(row=999, padx=0, pady=4)
+
+    def _build_power_section(self) -> None:
+        frame = self._make_section_frame("power")
+
+        info_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        info_frame.grid(row=0, column=0, padx=20, pady=(16, 10), sticky="ew")
+
+        ctk.CTkLabel(
+            info_frame, text="⚡ Plan de Energía y CPU",
+            font=FONT_HEADING, text_color=COLOR_TEXT,
+        ).pack(anchor="w", padx=16, pady=(12, 4))
+
+        laptop_note = " (para laptops se usará High Performance)" if self.is_laptop else ""
+        ctk.CTkLabel(
+            info_frame,
+            text=(
+                f"Configura Windows para máximo rendimiento{laptop_note}. "
+                "Habilita el plan Ultimate Performance (oculto por defecto en Windows), "
+                "configura el procesador al 100% y optimiza las opciones de energía."
+            ),
+            font=FONT_BODY, text_color=COLOR_MUTED, wraplength=700,
+        ).pack(anchor="w", padx=16, pady=(0, 12))
+
+        options = [
+            ("pwr_ultimate", "⚡ Plan Ultimate Performance",
+             "Activa el plan de energía más agresivo de Windows. Elimina micro-latencias del CPU.",
+             not self.is_laptop),
+            ("pwr_processor", "🔥 Procesador al 100% constante",
+             "Configura el estado mínimo/máximo del procesador al 100%. Sin throttling de frecuencia.",
+             not self.is_laptop),
+            ("pwr_hibernation", "💤 Deshabilitar hibernación",
+             "Libera espacio en disco equivalente al tamaño de tu RAM. En SSD mejora el rendimiento.",
+             not self.is_laptop),
+        ]
+
+        for row_i, (key, title, desc, default) in enumerate(options):
+            opt_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+            opt_frame.grid(row=row_i + 1, column=0, padx=20, pady=6, sticky="ew")
+            opt_frame.grid_columnconfigure(1, weight=1)
+
+            cb_var = ctk.BooleanVar(value=default)
+            cb = ctk.CTkCheckBox(
+                opt_frame, text="", variable=cb_var,
+                checkbox_width=20, checkbox_height=20,
+                checkmark_color="#000000", fg_color=COLOR_ACCENT,
+                border_color=COLOR_BORDER,
+            )
+            cb.grid(row=0, column=0, padx=16, pady=16)
+            self._checkboxes[key] = cb
+
+            ctk.CTkLabel(
+                opt_frame, text=title, font=("Segoe UI", 12, "bold"), text_color=COLOR_TEXT
+            ).grid(row=0, column=1, padx=8, pady=(12, 4), sticky="w")
+            ctk.CTkLabel(
+                opt_frame, text=desc, font=FONT_BODY, text_color=COLOR_MUTED, wraplength=600
+            ).grid(row=1, column=1, padx=8, pady=(0, 12), sticky="w")
+
+            if self.is_laptop and not default:
+                ctk.CTkLabel(
+                    opt_frame,
+                    text="⚠️ No recomendado para laptops con batería",
+                    font=FONT_SMALL, text_color=COLOR_WARNING,
+                ).grid(row=2, column=1, padx=8, pady=(0, 8), sticky="w")
+
+    def _build_cleanup_section(self) -> None:
+        frame = self._make_section_frame("cleanup")
+
+        options = [
+            ("clean_user_temp", "🗂  Limpiar carpeta TEMP del usuario",
+             "Elimina archivos temporales de aplicaciones en %TEMP%", True),
+            ("clean_system_temp", "🗂  Limpiar Windows\\Temp",
+             "Elimina archivos temporales del sistema operativo", True),
+            ("clean_recycle_bin", "🗑  Vaciar Papelera de Reciclaje",
+             "Vacía la Papelera de todos los usuarios", True),
+            ("clean_wu_cache", "🔄  Limpiar caché de Windows Update",
+             "Elimina archivos de actualización descargados pero no instalados. Puede liberar varios GB.", True),
+            ("clean_trim", "💿  Verificar/Habilitar TRIM (SSD)",
+             "Verifica que TRIM está habilitado en SSDs para mantener el rendimiento", True),
+            ("clean_dism", "⚙️  Limpiar WinSxS con DISM",
+             "Limpia el Component Store de Windows. Puede liberar 2-15 GB. LENTO (5-10 min).", False),
+            ("clean_event_logs", "📋  Limpiar logs de eventos",
+             "Elimina los logs del Visor de Eventos de Windows", False),
+        ]
+
+        ctk.CTkLabel(
+            frame, text="Selecciona qué limpiar. Las opciones lentas están desactivadas por defecto.",
+            font=FONT_BODY, text_color=COLOR_MUTED, wraplength=700,
+        ).grid(row=0, column=0, padx=20, pady=(16, 8), sticky="w")
+
+        for row_i, (key, title, desc, default) in enumerate(options):
+            opt_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+            opt_frame.grid(row=row_i + 1, column=0, padx=20, pady=6, sticky="ew")
+            opt_frame.grid_columnconfigure(1, weight=1)
+
+            cb_var = ctk.BooleanVar(value=default)
+            cb = ctk.CTkCheckBox(
+                opt_frame, text="", variable=cb_var,
+                checkbox_width=20, checkbox_height=20,
+                checkmark_color="#000000", fg_color=COLOR_ACCENT,
+                border_color=COLOR_BORDER,
+            )
+            cb.grid(row=0, column=0, padx=16, pady=14)
+            self._checkboxes[key] = cb
+
+            ctk.CTkLabel(
+                opt_frame, text=title, font=("Segoe UI", 12, "bold"), text_color=COLOR_TEXT
+            ).grid(row=0, column=1, padx=8, pady=(12, 4), sticky="w")
+            ctk.CTkLabel(
+                opt_frame, text=desc, font=FONT_BODY, text_color=COLOR_MUTED, wraplength=600
+            ).grid(row=1, column=1, padx=8, pady=(0, 12), sticky="w")
+
+    def _build_network_section(self) -> None:
+        frame = self._make_section_frame("network")
+
+        options = [
+            ("net_nagle", "🎮  Deshabilitar Algoritmo de Nagle",
+             "Reduce latencia en juegos online y aplicaciones de tiempo real. Puede ahorrar 10-200ms de latencia.", True),
+            ("net_tcp", "📡  Optimizar configuraciones TCP",
+             "Ajusta parámetros TCP/IP para mejor throughput y menor latencia. Incluye RSS, autotuning.", True),
+            ("net_throttling", "🚫  Deshabilitar Network Throttling",
+             "Elimina la limitación de ancho de banda que Windows impone a apps multimedia.", True),
+            ("net_dns", "🔄  Limpiar caché DNS",
+             "Limpia la caché DNS del sistema para resolver IPs actualizadas.", True),
+        ]
+
+        ctk.CTkLabel(
+            frame,
+            text="Optimizaciones de red para reducir latencia y mejorar velocidad de conexión.",
+            font=FONT_BODY, text_color=COLOR_MUTED, wraplength=700,
+        ).grid(row=0, column=0, padx=20, pady=(16, 8), sticky="w")
+
+        for row_i, (key, title, desc, default) in enumerate(options):
+            opt_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+            opt_frame.grid(row=row_i + 1, column=0, padx=20, pady=6, sticky="ew")
+            opt_frame.grid_columnconfigure(1, weight=1)
+
+            cb_var = ctk.BooleanVar(value=default)
+            cb = ctk.CTkCheckBox(
+                opt_frame, text="", variable=cb_var,
+                checkbox_width=20, checkbox_height=20,
+                checkmark_color="#000000", fg_color=COLOR_ACCENT,
+                border_color=COLOR_BORDER,
+            )
+            cb.grid(row=0, column=0, padx=16, pady=14)
+            self._checkboxes[key] = cb
+
+            ctk.CTkLabel(
+                opt_frame, text=title, font=("Segoe UI", 12, "bold"), text_color=COLOR_TEXT
+            ).grid(row=0, column=1, padx=8, pady=(12, 4), sticky="w")
+            ctk.CTkLabel(
+                opt_frame, text=desc, font=FONT_BODY, text_color=COLOR_MUTED, wraplength=600
+            ).grid(row=1, column=1, padx=8, pady=(0, 12), sticky="w")
+
+    def _build_visual_section(self) -> None:
+        frame = self._make_section_frame("visual")
+
+        ctk.CTkLabel(
+            frame,
+            text="Deshabilitar efectos visuales libera CPU y RAM. Ideal para PCs con recursos limitados.",
+            font=FONT_BODY, text_color=COLOR_MUTED, wraplength=700,
+        ).grid(row=0, column=0, padx=20, pady=(16, 8), sticky="w")
+
+        options = [
+            ("vis_performance", "🚀  Modo Rendimiento Visual",
+             "Configura VisualFXSetting = 2 (mejor rendimiento). Desactiva sombras, efectos, etc.", True),
+            ("vis_animations", "🎬  Deshabilitar animaciones de ventanas",
+             "Elimina las animaciones de minimizar/maximizar. Interfaz inmediatamente más rápida.", True),
+            ("vis_transparency", "🔮  Deshabilitar transparencia del sistema",
+             "Elimina los efectos de cristal/transparencia de la barra de tareas y menús.", False),
+            ("vis_aero_shake", "🪟  Deshabilitar Aero Shake",
+             "Deshabilita la función de sacudir una ventana para minimizar las demás.", True),
+        ]
+
+        for row_i, (key, title, desc, default) in enumerate(options):
+            opt_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+            opt_frame.grid(row=row_i + 1, column=0, padx=20, pady=6, sticky="ew")
+            opt_frame.grid_columnconfigure(1, weight=1)
+
+            cb_var = ctk.BooleanVar(value=default)
+            cb = ctk.CTkCheckBox(
+                opt_frame, text="", variable=cb_var,
+                checkbox_width=20, checkbox_height=20,
+                checkmark_color="#000000", fg_color=COLOR_ACCENT,
+                border_color=COLOR_BORDER,
+            )
+            cb.grid(row=0, column=0, padx=16, pady=14)
+            self._checkboxes[key] = cb
+
+            ctk.CTkLabel(
+                opt_frame, text=title, font=("Segoe UI", 12, "bold"), text_color=COLOR_TEXT
+            ).grid(row=0, column=1, padx=8, pady=(12, 4), sticky="w")
+            ctk.CTkLabel(
+                opt_frame, text=desc, font=FONT_BODY, text_color=COLOR_MUTED, wraplength=600
+            ).grid(row=1, column=1, padx=8, pady=(0, 12), sticky="w")
+
+    def _build_log_section(self) -> None:
+        frame = self._make_section_frame("log")
+
+        header = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        header.grid(row=0, column=0, padx=20, pady=(16, 10), sticky="ew")
+
+        ctk.CTkLabel(
+            header, text="📋 Historial de Cambios",
+            font=FONT_HEADING, text_color=COLOR_TEXT,
+        ).pack(anchor="w", padx=16, pady=(12, 4))
+        ctk.CTkLabel(
+            header,
+            text="Registro de todas las optimizaciones aplicadas en esta sesión.",
+            font=FONT_BODY, text_color=COLOR_MUTED,
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        # Botón actualizar log
+        ctk.CTkButton(
+            header, text="🔄 Actualizar",
+            font=FONT_BODY, fg_color=COLOR_ACCENT2,
+            hover_color="#2563eb", text_color=COLOR_TEXT,
+            width=120, height=30,
+            command=self._refresh_log,
+        ).pack(anchor="e", padx=16, pady=(0, 8))
+
+        # Área de texto del log
+        self._log_text = ctk.CTkTextbox(
+            frame,
+            font=FONT_CODE,
+            fg_color="#0d1117",
+            text_color=COLOR_TEXT,
+            corner_radius=8,
+            height=400,
+        )
+        self._log_text.grid(row=1, column=0, padx=20, pady=10, sticky="nsew")
+        frame.grid_rowconfigure(1, weight=1)
+
+        # Directorio de logs
+        log_dir_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=8)
+        log_dir_frame.grid(row=2, column=0, padx=20, pady=(0, 16), sticky="ew")
+
+        backup_mgr = BackupManager()
+        log_dir = str(backup_mgr.get_backup_dir().parent)
+        ctk.CTkLabel(
+            log_dir_frame,
+            text=f"📁 Directorio de logs: {log_dir}",
+            font=FONT_SMALL, text_color=COLOR_MUTED,
+        ).pack(anchor="w", padx=16, pady=8)
+
+    def _refresh_log(self) -> None:
+        """Actualiza el área de texto del log con los cambios de la sesión."""
+        changes = self.tracker.get_session_changes()
+        self._log_text.delete("0.0", "end")
+
+        if not changes:
+            self._log_text.insert("0.0", "Sin cambios registrados en esta sesión.\n")
+            return
+
+        content = f"=== WinOptimizer Pro - Sesión {datetime.now().strftime('%Y-%m-%d %H:%M')} ===\n\n"
+        for i, change in enumerate(changes, 1):
+            ts = change.get("timestamp", "")[:19].replace("T", " ")
+            status = "✅" if change.get("status") == "success" else "❌"
+            content += f"{i:02d}. [{ts}] {status} {change.get('description', '')}\n"
+            if change.get("revert_command"):
+                content += f"     🔄 Revertir: {change['revert_command'][:80]}\n"
+            content += "\n"
+
+        self._log_text.insert("0.0", content)
+
+    # ─── NAVEGACIÓN ───────────────────────────────────────────────────────────
+
+    def _show_section(self, section_id: str) -> None:
+        """Muestra la sección especificada y oculta las demás."""
+        for s_id, frame in self._section_frames.items():
+            frame.grid_remove()
+
+        if section_id in self._section_frames:
+            self._section_frames[section_id].grid()
+
+        # Actualizar botones de navegación
+        for btn_id, btn in self._nav_buttons.items():
+            if btn_id == section_id:
+                btn.configure(fg_color="#1f2937", text_color=COLOR_ACCENT)
+            else:
+                btn.configure(fg_color="transparent", text_color=COLOR_MUTED)
+
+        # Actualizar título del header
+        titles = {
+            "dashboard": "🏠  Dashboard",
+            "services": "⚙️  Servicios",
+            "registry": "🔧  Registro de Windows",
+            "power": "⚡  Plan de Energía",
+            "cleanup": "🧹  Limpieza del Sistema",
+            "network": "🌐  Optimización de Red",
+            "visual": "👁  Efectos Visuales",
+            "log": "📋  Registro de Cambios",
+        }
+        self._section_title.configure(text=titles.get(section_id, section_id.title()))
+        self._current_section = section_id
+
+        # Si va al log, actualizarlo
+        if section_id == "log":
+            self._refresh_log()
+
+    # ─── ACCIONES ─────────────────────────────────────────────────────────────
+
+    def _is_checked(self, key: str) -> bool:
+        cb = self._checkboxes.get(key)
+        if cb:
+            return cb.get() == 1
+        return False
+
+    def _update_progress(self, message: str, percentage: int) -> None:
+        """Actualiza la barra de progreso y el mensaje de estado (thread-safe)."""
+        def _update():
+            self._status_var.set(message)
+            self._progress_var.set(percentage / 100)
+        self.after(0, _update)
+
+    def _set_buttons_state(self, enabled: bool) -> None:
+        state = "normal" if enabled else "disabled"
+        self._apply_btn.configure(state=state)
+
+    def _create_backup_thread(self) -> None:
+        """Crea un punto de restauración en un hilo separado."""
+        if self._optimization_running:
+            return
+        self._optimization_running = True
+        self._set_buttons_state(False)
+        threading.Thread(target=self._create_backup_task, daemon=True).start()
+
+    def _create_backup_task(self) -> None:
+        self._update_progress("Creando punto de restauración...", 0)
+        backup_mgr = BackupManager(progress_callback=self._update_progress)
+        ok = backup_mgr.create_restore_point("WinOptimizer - Antes de optimizar")
+
+        # Respaldar claves de registro
+        reg_keys = self.reg_opt.get_registry_keys_for_backup()
+        self._backup_data = backup_mgr.backup_registry_keys(reg_keys)
+
+        if ok:
+            self._backup_created = True
+            self.after(0, lambda: messagebox.showinfo(
+                "Backup creado",
+                "✅ Punto de restauración del sistema creado exitosamente.\n\n"
+                "Ya puedes aplicar las optimizaciones de forma segura.",
+            ))
+        else:
+            self.after(0, lambda: messagebox.showwarning(
+                "Advertencia",
+                "⚠️ No se pudo crear el punto de restauración.\n"
+                "Esto puede deberse a que ya existe uno reciente (< 24h).\n\n"
+                "Puedes continuar, pero se recomienda proceder con precaución.",
+            ))
+
+        self._update_progress("Backup completado.", 100)
+        self._optimization_running = False
+        self.after(0, lambda: self._set_buttons_state(True))
+
+    def _apply_all_thread(self) -> None:
+        """Aplica todas las optimizaciones seleccionadas en un hilo separado."""
+        if self._optimization_running:
+            return
+
+        # Verificar backup
+        if not self._backup_created:
+            confirm = messagebox.askyesno(
+                "Sin backup",
+                "⚠️ No has creado un punto de restauración.\n\n"
+                "¿Deseas continuar sin él?\n"
+                "(No recomendado - primero haz clic en '🛡 Crear Backup')",
+            )
+            if not confirm:
+                return
+
+        # Confirmar
+        confirm = messagebox.askyesno(
+            "Confirmar optimización",
+            "¿Aplicar todas las optimizaciones seleccionadas?\n\n"
+            "• Los cambios en registro requieren reiniciar para tomar efecto completo.\n"
+            "• Los servicios se deshabilitarán inmediatamente.\n"
+            "• Puedes revertir los cambios desde el botón '↩ Revertir'.",
+        )
+        if not confirm:
+            return
+
+        self._optimization_running = True
+        self._set_buttons_state(False)
+        threading.Thread(target=self._apply_all_task, daemon=True).start()
+
+    def _apply_all_task(self) -> None:
+        """Tarea de aplicación de optimizaciones (ejecuta en hilo separado)."""
+        total_ok = 0
+        total_fail = 0
+        is_win11 = self.system_info.get("is_win11", False)
+
+        try:
+            # 1. Servicios
+            selected_svcs = [
+                key.replace("svc_", "")
+                for key, cb in self._checkboxes.items()
+                if key.startswith("svc_") and cb.get() == 1
+            ]
+            if selected_svcs:
+                self._update_progress("Optimizando servicios...", 10)
+                ok, fail = self.svc_opt.optimize_all(selected_svcs, is_win11)
+                total_ok += ok
+                total_fail += fail
+
+            # 2. Registro
+            selected_regs = [
+                key.replace("reg_", "")
+                for key, cb in self._checkboxes.items()
+                if key.startswith("reg_") and cb.get() == 1
+            ]
+            if selected_regs:
+                self._update_progress("Aplicando tweaks del registro...", 30)
+                ok, fail = self.reg_opt.apply_all(selected_regs)
+                total_ok += ok
+                total_fail += fail
+
+            # 3. Energía
+            self._update_progress("Configurando plan de energía...", 45)
+            if self._is_checked("pwr_ultimate"):
+                ok = self.pwr_opt.enable_ultimate_performance() if not self.is_laptop else \
+                     self.pwr_opt.optimize_all(is_laptop=True)[0] > 0
+                total_ok += 1 if ok else 0
+                total_fail += 0 if ok else 1
+
+            if self._is_checked("pwr_processor") and not self.is_laptop:
+                ok = self.pwr_opt.set_processor_state(100, 100)
+                total_ok += 1 if ok else 0
+
+            if self._is_checked("pwr_hibernation") and not self.is_laptop:
+                ok = self.pwr_opt.disable_hibernation()
+                total_ok += 1 if ok else 0
+
+            # 4. Limpieza
+            self._update_progress("Limpiando sistema...", 60)
+            run_dism = self._is_checked("clean_dism")
+            clean_logs = self._is_checked("clean_event_logs")
+
+            if self._is_checked("clean_user_temp"):
+                ok, _ = self.clean_opt.clean_user_temp()
+                total_ok += 1 if ok else 0
+
+            if self._is_checked("clean_system_temp"):
+                ok, _ = self.clean_opt.clean_system_temp()
+                total_ok += 1 if ok else 0
+
+            if self._is_checked("clean_recycle_bin"):
+                ok, _ = self.clean_opt.clean_recycle_bin()
+                total_ok += 1 if ok else 0
+
+            if self._is_checked("clean_wu_cache"):
+                ok, _ = self.clean_opt.clean_windows_update_cache()
+                total_ok += 1 if ok else 0
+
+            if self._is_checked("clean_trim"):
+                ok = self.clean_opt.enable_trim() or self.clean_opt.check_trim_status()
+                total_ok += 1 if ok else 0
+
+            if run_dism:
+                ok, _ = self.clean_opt.run_dism_cleanup()
+                total_ok += 1 if ok else 0
+
+            if clean_logs:
+                ok = self.clean_opt.clean_event_logs()
+                total_ok += 1 if ok else 0
+
+            # 5. Red
+            self._update_progress("Optimizando red...", 78)
+            if self._is_checked("net_nagle"):
+                ok = self.net_opt.disable_nagle_algorithm()
+                total_ok += 1 if ok else 0
+
+            if self._is_checked("net_tcp"):
+                ok = self.net_opt.optimize_tcp_settings()
+                total_ok += 1 if ok else 0
+
+            if self._is_checked("net_throttling"):
+                ok = self.net_opt.disable_network_throttling()
+                total_ok += 1 if ok else 0
+
+            if self._is_checked("net_dns"):
+                ok = self.net_opt.flush_dns()
+                total_ok += 1 if ok else 0
+
+            # 6. Visual
+            self._update_progress("Optimizando efectos visuales...", 90)
+            if self._is_checked("vis_performance"):
+                ok = self.vis_opt.set_performance_mode()
+                total_ok += 1 if ok else 0
+
+            if self._is_checked("vis_animations"):
+                ok = self.vis_opt.disable_window_animations()
+                total_ok += 1 if ok else 0
+
+            if self._is_checked("vis_transparency"):
+                ok = self.vis_opt.disable_transparency()
+                total_ok += 1 if ok else 0
+
+            if self._is_checked("vis_aero_shake"):
+                ok = self.vis_opt.disable_aero_shake()
+                total_ok += 1 if ok else 0
+
+            self._update_progress(
+                f"✅ Optimización completada: {total_ok} éxitos, {total_fail} fallos.", 100
+            )
+
+        except Exception as e:
+            logger.error(f"Error crítico durante optimización: {e}", exc_info=True)
+            self._update_progress(f"❌ Error: {e}", 0)
+            total_fail += 1
+
+        finally:
+            self._optimization_running = False
+            self.after(0, lambda: self._set_buttons_state(True))
+
+        # Mostrar resultado
+        self.after(0, lambda: messagebox.showinfo(
+            "Optimización completada",
+            f"✅ Optimización finalizada\n\n"
+            f"• Exitosas: {total_ok}\n"
+            f"• Con errores: {total_fail}\n\n"
+            f"🔄 Se recomienda REINICIAR el equipo para que todos los cambios "
+            f"tomen efecto completamente.\n\n"
+            f"📋 Ve a la sección 'Registro de Cambios' para ver el detalle.",
+        ))
+
+    def _revert_changes_thread(self) -> None:
+        """Revierte los cambios aplicados."""
+        if self._optimization_running:
+            return
+
+        revertible = self.tracker.get_revertible_changes()
+        if not revertible:
+            messagebox.showinfo("Sin cambios", "No hay cambios para revertir en esta sesión.")
+            return
+
+        confirm = messagebox.askyesno(
+            "Confirmar reversión",
+            f"¿Revertir los {len(revertible)} cambios de esta sesión?\n\n"
+            "Esto restaurará la configuración anterior.\n"
+            "⚠️ Los servicios deshabilitados se volverán a habilitar en modo Manual.",
+        )
+        if not confirm:
+            return
+
+        self._optimization_running = True
+        self._set_buttons_state(False)
+        threading.Thread(target=self._revert_task, daemon=True).start()
+
+    def _revert_task(self) -> None:
+        """Ejecuta la reversión de cambios."""
+        self._update_progress("Revirtiendo cambios...", 0)
+        ok_count = 0
+        fail_count = 0
+
+        changes = self.tracker.get_revertible_changes()
+        total = len(changes)
+
+        from optimizer.core import PowerShellRunner
+        ps = PowerShellRunner()
+
+        for i, change in enumerate(changes):
+            pct = int(((i + 1) / total) * 100)
+            self._update_progress(f"Revirtiendo: {change['description'][:50]}...", pct)
+
+            revert_cmd = change.get("revert_command")
+            if revert_cmd:
+                ok, _, _ = ps.run(revert_cmd)
+                if ok:
+                    ok_count += 1
+                else:
+                    fail_count += 1
+                    logger.warning(f"Error revirtiendo: {change['description']}")
+
+        # Revertir tweaks del registro usando los datos de respaldo
+        if self._backup_data:
+            backup_mgr = BackupManager()
+            r_ok, r_fail = backup_mgr.restore_registry_from_backup(self._backup_data)
+            ok_count += r_ok
+            fail_count += r_fail
+
+        self._update_progress(
+            f"↩️ Reversión completada: {ok_count} éxitos, {fail_count} fallos.", 100
+        )
+        self._optimization_running = False
+        self.after(0, lambda: self._set_buttons_state(True))
+
+        self.after(0, lambda: messagebox.showinfo(
+            "Reversión completada",
+            f"↩️ Cambios revertidos\n\n"
+            f"• Exitosos: {ok_count}\n"
+            f"• Con errores: {fail_count}\n\n"
+            "Se recomienda reiniciar el equipo.",
+        ))
+
+
+def main() -> None:
+    """Punto de entrada principal."""
+    # Verificar y solicitar permisos de administrador
+    if not is_admin():
+        logger.warning("No se tienen permisos de administrador. Solicitando elevación...")
+        request_admin()
+        return
+
+    logger.info(f"Iniciando {APP_NAME} v{APP_VERSION}")
+    app = WinOptimizerApp()
+    app.mainloop()
+
+
+if __name__ == "__main__":
+    main()
