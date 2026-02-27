@@ -73,6 +73,11 @@ def build(one_file: bool = True, debug: bool = False) -> None:
     """Ejecuta PyInstaller para compilar el ejecutable."""
     create_default_icon()
 
+    # Detectar rutas de TCL/TK para incluirlas explícitamente
+    python_dir = Path(sys.executable).parent
+    tcl_dir = python_dir / "tcl"
+    dlls_dir = python_dir / "DLLs"
+
     # Argumentos base de PyInstaller
     pyinstaller_args = [
         sys.executable, "-m", "PyInstaller",
@@ -81,12 +86,30 @@ def build(one_file: bool = True, debug: bool = False) -> None:
         "--clean",
         "--noconfirm",
         "--collect-all", "customtkinter",
+        "--collect-all", "tkinter",
+        "--hidden-import", "tkinter",
+        "--hidden-import", "tkinter.ttk",
+        "--hidden-import", "tkinter.messagebox",
+        "--hidden-import", "_tkinter",
         "--hidden-import", "PIL",
         "--hidden-import", "PIL._tkinter_finder",
         "--hidden-import", "winreg",
         "--add-data", "optimizer;optimizer",
         "--add-data", "utils;utils",
     ]
+
+    # Incluir DLLs de TCL/TK explícitamente
+    for dll_name in ["tcl86t.dll", "tk86t.dll", "_tkinter.pyd"]:
+        dll_path = dlls_dir / dll_name
+        if dll_path.exists():
+            pyinstaller_args += ["--add-binary", f"{dll_path};."]
+
+    # Incluir carpetas de scripts TCL/TK
+    if tcl_dir.exists():
+        for subdir in ["tcl8.6", "tk8.6"]:
+            full = tcl_dir / subdir
+            if full.exists():
+                pyinstaller_args += ["--add-data", f"{full};tcl/{subdir}"]
 
     # Icono (si existe)
     if Path(ICON_PATH).exists():
