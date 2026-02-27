@@ -27,3 +27,17 @@ backups/
 .vscode/
 .idea/
 *.sublime-project
+
+# Archivos temporales de prueba y desarrollo
+test_*.py
+test_*.txt
+take_screenshot.py
+screenshot*.py
+screenshot*.png
+bring_forward.ps1
+do_build.ps1
+build_old/
+
+# Entorno virtual local
+Lib/
+Scripts/
