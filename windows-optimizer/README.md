@@ -18,6 +18,9 @@
 - ✅ **Limpieza profunda** del sistema (temp, WU cache, WinSxS)
 - ✅ **Optimización de red** (Nagle, TCP, DNS)
 - ✅ **Efectos visuales** configurables
+- ✅ **Monitor en tiempo real** — CPU, RAM, Disco y Red cada 2 segundos
+- ✅ **Panel de Actividad** — historial visual de optimizaciones con filtros
+- ✅ **Asistente IA** — powered by OpenRouter (gpt-4o-mini)
 - ✅ **Punto de restauración** automático antes de cambios
 - ✅ **Reversión completa** de todos los cambios
 - ✅ **Log detallado** de cada operación
@@ -31,17 +34,20 @@
 │ ⚡WinOptimiz │  🏠 Dashboard                            │
 │              │  ────────────────────────────────────   │
 │ 🏠 Dashboard │  🖥 Windows 11    💾 16 GB   💿 SSD     │
-│ ⚙️ Servicios │                                          │
-│ 🔧 Registro  │  ⚠️ Recomendaciones:                    │
-│ ⚡ Energía   │  1. Crear backup primero                │
-│ 🧹 Limpieza  │  2. Cerrar aplicaciones                 │
-│ 🌐 Red       │  3. Revisar cada sección                │
-│ 👁 Visual    │  4. Reiniciar al finalizar              │
-│ 📋 Log       │                                          │
-│              │  📊 Optimizaciones disponibles:         │
-│ [🛡 Backup]  │  ⚙️ Servicios  18 servicios             │
-│ [🚀 Aplicar] │  🔧 Registro   12 tweaks                │
-│ [↩ Revertir] │  ⚡ Energía    Ultimate Performance     │
+│ 📊 Monitor   │                                          │
+│ ⚡ Actividad │  ⚠️ Recomendaciones:                    │
+│ ⚙️ Servicios │  1. Crear backup primero                │
+│ 🔧 Registro  │  2. Cerrar aplicaciones                 │
+│ ⚡ Energía   │  3. Revisar cada sección                │
+│ 🧹 Limpieza  │  4. Reiniciar al finalizar              │
+│ 🌐 Red       │                                          │
+│ 👁 Visual    │  📊 Optimizaciones disponibles:         │
+│ 📋 Historial │  ⚙️ Servicios  18 servicios             │
+│ 🤖 IA        │  🔧 Registro   12 tweaks                │
+│              │  ⚡ Energía    Ultimate Performance     │
+│ [🛡 Backup]  │                                          │
+│ [🚀 Aplicar] │                                          │
+│ [↩ Revertir] │                                          │
 └──────────────┴─────────────────────────────────────────┘
 ```
 
@@ -78,7 +84,9 @@ windows-optimizer/
 │   ├── power.py              # Plan de energía
 │   ├── cleanup.py            # Limpieza del disco
 │   ├── network.py            # Optimización de red
-│   └── visual.py             # Efectos visuales
+│   ├── visual.py             # Efectos visuales
+│   ├── performance_monitor.py # Monitor de rendimiento en tiempo real
+│   └── ai_assistant.py       # Asistente IA (OpenRouter)
 │
 ├── utils/
 │   ├── admin.py              # Verificación de privilegios
@@ -115,7 +123,9 @@ windows-optimizer/
 | Componente | Tecnología |
 |------------|-----------|
 | GUI | CustomTkinter 5.2+ |
+| Monitor en tiempo real | psutil 5.9+ |
 | Optimizaciones | PowerShell 5.1 + winreg |
+| Asistente IA | OpenRouter API (gpt-4o-mini) |
 | Compilación | PyInstaller 6.0+ |
 | Logging | Python logging module |
 | Backup | WMI + JSON |
