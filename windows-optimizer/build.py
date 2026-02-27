@@ -73,10 +73,32 @@ def build(one_file: bool = True, debug: bool = False) -> None:
     """Ejecuta PyInstaller para compilar el ejecutable."""
     create_default_icon()
 
-    # Detectar rutas de TCL/TK para incluirlas explícitamente
-    python_dir = Path(sys.executable).parent
+    # Detectar rutas de TCL/TK — buscar en múltiples ubicaciones posibles
+    import sysconfig, glob as _glob
+
+    def _find_python_home() -> Path:
+        """Busca el directorio real de Python (no el lanzador py.exe)."""
+        candidates = [
+            Path(sys.executable).parent,
+            Path(sysconfig.get_path("stdlib")).parent.parent,
+        ]
+        # También buscar por tkinter.__file__
+        try:
+            import tkinter as _tk
+            candidates.append(Path(_tk.__file__).parent.parent.parent)
+        except Exception:
+            pass
+        for c in candidates:
+            if (c / "DLLs").exists() and (c / "tcl").exists():
+                return c
+        return Path(sys.executable).parent
+
+    python_dir = _find_python_home()
     tcl_dir = python_dir / "tcl"
     dlls_dir = python_dir / "DLLs"
+    print(f"[build] Python home detectado: {python_dir}")
+    print(f"[build] TCL dir: {tcl_dir} (existe: {tcl_dir.exists()})")
+    print(f"[build] DLLs dir: {dlls_dir} (existe: {dlls_dir.exists()})")
 
     # Argumentos base de PyInstaller
     pyinstaller_args = [
@@ -104,12 +126,15 @@ def build(one_file: bool = True, debug: bool = False) -> None:
         if dll_path.exists():
             pyinstaller_args += ["--add-binary", f"{dll_path};."]
 
-    # Incluir carpetas de scripts TCL/TK
+    # Incluir carpetas TCL/TK con los nombres exactos que PyInstaller espera:
+    # pyi_rth__tkinter.py busca "_tcl_data" y "_tk_data" en el directorio temporal
     if tcl_dir.exists():
-        for subdir in ["tcl8.6", "tk8.6"]:
-            full = tcl_dir / subdir
-            if full.exists():
-                pyinstaller_args += ["--add-data", f"{full};tcl/{subdir}"]
+        tcl86 = tcl_dir / "tcl8.6"
+        tk86  = tcl_dir / "tk8.6"
+        if tcl86.exists():
+            pyinstaller_args += ["--add-data", f"{tcl86};_tcl_data"]
+        if tk86.exists():
+            pyinstaller_args += ["--add-data", f"{tk86};_tk_data"]
 
     # Icono (si existe)
     if Path(ICON_PATH).exists():
