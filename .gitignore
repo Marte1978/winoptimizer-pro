@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Build artifacts
+dist/
+build/
+*.spec
+version_info.txt
+
+# PyInstaller
+*.exe
+
+# Environments
+.env
+venv/
+.venv/
+
+# Logs y backups generados en runtime
+logs/
+backups/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
