@@ -39,6 +39,7 @@ from optimizer.power import PowerOptimizer
 from optimizer.cleanup import DiskCleaner
 from optimizer.network import NetworkOptimizer
 from optimizer.visual import VisualOptimizer
+from optimizer.ai_assistant import AIAssistant
 
 logger = setup_logger("WinOptimizer")
 
@@ -94,6 +95,7 @@ class WinOptimizerApp(ctk.CTk):
         self.clean_opt = DiskCleaner(self.tracker, make_progress)
         self.net_opt = NetworkOptimizer(self.tracker, make_progress)
         self.vis_opt = VisualOptimizer(self.tracker, make_progress)
+        self.ai_assistant = AIAssistant()
 
         # Configurar ventana
         self._setup_window()
@@ -213,6 +215,7 @@ class WinOptimizerApp(ctk.CTk):
             ("network", "🌐  Red", "Optimización de red y TCP"),
             ("visual", "👁  Visual", "Efectos visuales"),
             ("log", "📋  Registro", "Historial de cambios"),
+            ("ai", "🤖  Asistente IA", "Recomendaciones con inteligencia artificial"),
         ]
 
         nav_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
@@ -321,6 +324,7 @@ class WinOptimizerApp(ctk.CTk):
         self._build_network_section()
         self._build_visual_section()
         self._build_log_section()
+        self._build_ai_section()
 
     def _build_status_bar(self) -> None:
         """Barra de estado inferior con barra de progreso."""
@@ -938,6 +942,7 @@ class WinOptimizerApp(ctk.CTk):
             "network": "🌐  Optimización de Red",
             "visual": "👁  Efectos Visuales",
             "log": "📋  Registro de Cambios",
+            "ai": "🤖  Asistente IA",
         }
         self._section_title.configure(text=titles.get(section_id, section_id.title()))
         self._current_section = section_id
@@ -1240,6 +1245,181 @@ class WinOptimizerApp(ctk.CTk):
             f"• Con errores: {fail_count}\n\n"
             "Se recomienda reiniciar el equipo.",
         ))
+
+
+    # ─── SECCIÓN ASISTENTE IA ────────────────────────────────────────────────
+
+    def _build_ai_section(self) -> None:
+        frame = self._make_section_frame("ai")
+        frame.grid_columnconfigure(0, weight=1)
+
+        # Card de configuración API
+        api_card = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        api_card.grid(row=0, column=0, padx=20, pady=(16, 8), sticky="ew")
+        api_card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            api_card, text="🤖 Asistente IA — Powered by OpenRouter",
+            font=FONT_HEADING, text_color=COLOR_ACCENT,
+        ).pack(anchor="w", padx=16, pady=(12, 2))
+        ctk.CTkLabel(
+            api_card,
+            text="Analiza tu sistema, recomienda optimizaciones y responde preguntas técnicas.",
+            font=FONT_BODY, text_color=COLOR_MUTED,
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        key_row = ctk.CTkFrame(api_card, fg_color="transparent")
+        key_row.pack(fill="x", padx=16, pady=(0, 12))
+        key_row.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            key_row, text="API Key:", font=FONT_BODY, text_color=COLOR_TEXT, width=70,
+        ).grid(row=0, column=0, padx=(0, 8))
+
+        self._api_key_var = ctk.StringVar(value=self.ai_assistant._api_key)
+        ctk.CTkEntry(
+            key_row, textvariable=self._api_key_var, show="*",
+            font=FONT_BODY, fg_color="#0d1117", text_color=COLOR_TEXT,
+            border_color=COLOR_BORDER, placeholder_text="sk-or-v1-...",
+        ).grid(row=0, column=1, sticky="ew", padx=(0, 8))
+
+        ctk.CTkButton(
+            key_row, text="Guardar", font=FONT_SMALL,
+            fg_color=COLOR_ACCENT2, hover_color="#2563eb", text_color=COLOR_TEXT,
+            width=80, height=32, command=self._save_ai_key,
+        ).grid(row=0, column=2)
+
+        # Botones de acceso rápido
+        presets_card = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        presets_card.grid(row=1, column=0, padx=20, pady=(0, 8), sticky="ew")
+        presets_card.grid_columnconfigure((0, 1), weight=1)
+
+        ctk.CTkLabel(
+            presets_card, text="Preguntas rápidas:", font=FONT_SMALL, text_color=COLOR_MUTED,
+        ).grid(row=0, column=0, columnspan=2, padx=16, pady=(10, 6), sticky="w")
+
+        presets = [
+            ("🔍 Analizar mi sistema",
+             "Analiza mi sistema y dime cuáles son las optimizaciones más importantes para mi configuración. Dame un plan de acción priorizado de mayor a menor impacto."),
+            ("⚡ ¿Qué optimizar primero?",
+             "¿Cuáles son las 3 optimizaciones más impactantes que debo aplicar primero en este sistema? Explica el beneficio concreto de cada una."),
+            ("🎮 Optimizar para gaming",
+             "¿Cómo optimizo este sistema específicamente para gaming? ¿Qué tweaks tienen mayor impacto en FPS y latencia con mi hardware?"),
+            ("🛡 ¿Es seguro aplicar todo?",
+             "¿Es seguro aplicar todas las optimizaciones disponibles en mi sistema? ¿Hay alguna que deba evitar con mi configuración?"),
+        ]
+
+        for i, (label, prompt) in enumerate(presets):
+            ctk.CTkButton(
+                presets_card, text=label, font=FONT_SMALL,
+                fg_color="#1f2937", hover_color="#374151",
+                text_color=COLOR_TEXT, border_width=1, border_color=COLOR_BORDER,
+                height=34, corner_radius=6,
+                command=lambda p=prompt: self._send_ai_message(p),
+            ).grid(row=1 + i // 2, column=i % 2, padx=8, pady=4, sticky="ew")
+
+        ctk.CTkLabel(presets_card, text="").grid(row=3, padx=0, pady=2)
+
+        # Área de chat
+        self._ai_chat = ctk.CTkTextbox(
+            frame, font=("Consolas", 10),
+            fg_color="#0d1117", text_color=COLOR_TEXT,
+            corner_radius=8, state="disabled",
+        )
+        self._ai_chat.grid(row=2, column=0, padx=20, pady=(0, 8), sticky="nsew")
+        frame.grid_rowconfigure(2, weight=1)
+
+        self._ai_chat.configure(state="normal")
+        self._ai_chat.insert("0.0", "Bienvenido al Asistente IA de WinOptimizer Pro.\n"
+                             "Usa los botones rapidos o escribe tu pregunta abajo.\n"
+                             + "─" * 60 + "\n")
+        self._ai_chat.configure(state="disabled")
+
+        # Fila de input
+        input_card = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=8)
+        input_card.grid(row=3, column=0, padx=20, pady=(0, 16), sticky="ew")
+        input_card.grid_columnconfigure(0, weight=1)
+
+        self._ai_input = ctk.CTkEntry(
+            input_card, font=FONT_BODY,
+            fg_color="#0d1117", text_color=COLOR_TEXT,
+            border_color=COLOR_BORDER, placeholder_text="Escribe tu pregunta aqui...",
+            height=40,
+        )
+        self._ai_input.grid(row=0, column=0, padx=(12, 8), pady=10, sticky="ew")
+        self._ai_input.bind("<Return>", lambda e: self._send_ai_message())
+
+        self._ai_send_btn = ctk.CTkButton(
+            input_card, text="Enviar",
+            font=("Segoe UI", 11, "bold"),
+            fg_color=COLOR_ACCENT, hover_color="#00b894",
+            text_color="#000000", width=100, height=40,
+            command=self._send_ai_message,
+        )
+        self._ai_send_btn.grid(row=0, column=1, padx=(0, 8), pady=10)
+
+        ctk.CTkButton(
+            input_card, text="Limpiar", font=FONT_SMALL,
+            fg_color="transparent", hover_color="#1f2937",
+            text_color=COLOR_MUTED, width=72, height=40,
+            command=self._clear_ai_chat,
+        ).grid(row=0, column=2, padx=(0, 12), pady=10)
+
+    def _save_ai_key(self) -> None:
+        key = self._api_key_var.get().strip()
+        if key:
+            self.ai_assistant.save_api_key(key)
+            messagebox.showinfo("Guardado", "API key de OpenRouter guardada correctamente.")
+        else:
+            messagebox.showwarning("Sin clave", "Ingresa una API key valida.")
+
+    def _build_ai_context(self) -> str:
+        info = self.system_info
+        selected = [k for k, cb in self._checkboxes.items() if cb.get() == 1]
+        return (
+            f"SO: {info.get('product_name', 'Windows')} (Build {info.get('build', '?')})\n"
+            f"RAM: {info.get('ram_gb', '?')} GB | "
+            f"SSD: {'Si' if info.get('has_ssd') else 'No (HDD)'} | "
+            f"NVMe: {'Si' if info.get('has_nvme') else 'No'} | "
+            f"Laptop: {'Si' if self.is_laptop else 'No (Desktop)'} | "
+            f"Windows 11: {'Si' if info.get('is_win11') else 'No'}\n"
+            f"Optimizaciones seleccionadas: {len(selected)} de {len(self._checkboxes)}\n"
+            f"IDs seleccionados: {', '.join(selected[:20]) if selected else 'ninguno'}"
+        )
+
+    def _append_ai_chat(self, role: str, text: str) -> None:
+        self._ai_chat.configure(state="normal")
+        if role == "user":
+            self._ai_chat.insert("end", f"\nTu: {text}\n")
+        else:
+            self._ai_chat.insert("end", f"\nAsistente IA:\n{text}\n{'─' * 60}\n")
+        self._ai_chat.see("end")
+        self._ai_chat.configure(state="disabled")
+
+    def _send_ai_message(self, preset_text: str = "") -> None:
+        msg = preset_text or (self._ai_input.get().strip() if hasattr(self, "_ai_input") else "")
+        if not msg:
+            return
+        if not preset_text and hasattr(self, "_ai_input"):
+            self._ai_input.delete(0, "end")
+
+        self._append_ai_chat("user", msg)
+        self._ai_send_btn.configure(state="disabled", text="Pensando...")
+        context = self._build_ai_context()
+
+        def _task():
+            ok, response = self.ai_assistant.ask(msg, context)
+            self.after(0, lambda: self._append_ai_chat("assistant", response))
+            self.after(0, lambda: self._ai_send_btn.configure(state="normal", text="Enviar"))
+
+        threading.Thread(target=_task, daemon=True).start()
+
+    def _clear_ai_chat(self) -> None:
+        self.ai_assistant.clear_conversation()
+        self._ai_chat.configure(state="normal")
+        self._ai_chat.delete("0.0", "end")
+        self._ai_chat.insert("0.0", "Chat limpiado. Inicia una nueva conversacion.\n" + "─" * 60 + "\n")
+        self._ai_chat.configure(state="disabled")
 
 
 def main() -> None:
