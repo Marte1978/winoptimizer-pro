@@ -40,6 +40,7 @@ from optimizer.cleanup import DiskCleaner
 from optimizer.network import NetworkOptimizer
 from optimizer.visual import VisualOptimizer
 from optimizer.ai_assistant import AIAssistant
+from optimizer.performance_monitor import PerformanceMonitor, PerformanceSnapshot
 
 logger = setup_logger("WinOptimizer")
 
@@ -84,6 +85,11 @@ class WinOptimizerApp(ctk.CTk):
         self._section_frames: dict[str, ctk.CTkFrame] = {}
         self._nav_buttons: dict[str, ctk.CTkButton] = {}
 
+        # Monitor de rendimiento
+        self._perf_monitor = PerformanceMonitor(interval=2.0, on_update=self._on_perf_update)
+        self._perf_widgets: dict = {}  # widgets de la sección monitor
+        self._activity_log: list[dict] = []  # registro de actividad en tiempo real
+
         # Inicializar optimizadores
         def make_progress(msg, pct):
             self._update_progress(msg, pct)
@@ -101,6 +107,12 @@ class WinOptimizerApp(ctk.CTk):
         self._setup_window()
         self._build_ui()
         self._show_section("dashboard")
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self) -> None:
+        """Limpia recursos antes de cerrar."""
+        self._perf_monitor.stop()
+        self.destroy()
 
     def _detect_laptop(self) -> bool:
         """Detecta si el equipo es una laptop."""
@@ -208,13 +220,15 @@ class WinOptimizerApp(ctk.CTk):
         # Navegación
         nav_items = [
             ("dashboard", "🏠  Dashboard", "Vista general del sistema"),
+            ("monitor", "📊  Monitor", "Rendimiento en tiempo real"),
+            ("activity", "⚡  Actividad", "Optimizaciones aplicadas"),
             ("services", "⚙️  Servicios", "Gestionar servicios de Windows"),
             ("registry", "🔧  Registro", "Tweaks del registro"),
             ("power", "⚡  Energía", "Plan de energía y CPU"),
             ("cleanup", "🧹  Limpieza", "Archivos temporales y caché"),
             ("network", "🌐  Red", "Optimización de red y TCP"),
             ("visual", "👁  Visual", "Efectos visuales"),
-            ("log", "📋  Registro", "Historial de cambios"),
+            ("log", "📋  Historial", "Historial de cambios"),
             ("ai", "🤖  Asistente IA", "Recomendaciones con inteligencia artificial"),
         ]
 
@@ -317,6 +331,8 @@ class WinOptimizerApp(ctk.CTk):
 
         # Construir todas las secciones
         self._build_dashboard()
+        self._build_monitor_section()
+        self._build_activity_section()
         self._build_services_section()
         self._build_registry_section()
         self._build_power_section()
@@ -846,6 +862,384 @@ class WinOptimizerApp(ctk.CTk):
                 opt_frame, text=desc, font=FONT_BODY, text_color=COLOR_MUTED, wraplength=600
             ).grid(row=1, column=1, padx=8, pady=(0, 12), sticky="w")
 
+    # ─── MONITOR DE RENDIMIENTO ───────────────────────────────────────────────
+
+    def _build_monitor_section(self) -> None:
+        frame = self._make_section_frame("monitor")
+        frame.grid_columnconfigure(0, weight=1)
+
+        if not self._perf_monitor.is_available:
+            card = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+            card.grid(row=0, column=0, padx=20, pady=20, sticky="ew")
+            ctk.CTkLabel(
+                card,
+                text="⚠️  psutil no instalado",
+                font=FONT_HEADING, text_color=COLOR_WARNING,
+            ).pack(padx=20, pady=(16, 4))
+            ctk.CTkLabel(
+                card,
+                text="Instala psutil para activar el monitor:\n\npip install psutil",
+                font=FONT_CODE, text_color=COLOR_MUTED,
+            ).pack(padx=20, pady=(0, 16))
+            return
+
+        # ── Header ──────────────────────────────────────────────────────────
+        hdr = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        hdr.grid(row=0, column=0, padx=20, pady=(16, 8), sticky="ew")
+        hdr.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            hdr, text="📊 Monitor de Rendimiento en Tiempo Real",
+            font=FONT_HEADING, text_color=COLOR_ACCENT,
+        ).pack(anchor="w", padx=16, pady=(12, 2))
+        ctk.CTkLabel(
+            hdr, text="Actualiza cada 2 segundos automáticamente.",
+            font=FONT_SMALL, text_color=COLOR_MUTED,
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        # ── Fila superior: CPU y RAM ────────────────────────────────────────
+        top_row = ctk.CTkFrame(frame, fg_color="transparent")
+        top_row.grid(row=1, column=0, padx=20, pady=4, sticky="ew")
+        top_row.grid_columnconfigure((0, 1), weight=1)
+
+        cpu_card = self._make_metric_card(top_row, col=0, icon="🖥", title="CPU")
+        ram_card = self._make_metric_card(top_row, col=1, icon="💾", title="RAM")
+
+        self._perf_widgets["cpu_bar"] = self._add_gauge(cpu_card, "Uso CPU", COLOR_ACCENT)
+        self._perf_widgets["cpu_label"] = self._add_gauge_label(cpu_card)
+        self._perf_widgets["cpu_freq"] = self._add_sub_label(cpu_card, "Frecuencia: --")
+        self._perf_widgets["cpu_cores"] = self._add_sub_label(cpu_card, "Núcleos: --")
+
+        self._perf_widgets["ram_bar"] = self._add_gauge(ram_card, "Uso RAM", COLOR_ACCENT2)
+        self._perf_widgets["ram_label"] = self._add_gauge_label(ram_card)
+        self._perf_widgets["ram_detail"] = self._add_sub_label(ram_card, "-- / -- GB")
+
+        # ── Fila media: Disco y Red ─────────────────────────────────────────
+        mid_row = ctk.CTkFrame(frame, fg_color="transparent")
+        mid_row.grid(row=2, column=0, padx=20, pady=4, sticky="ew")
+        mid_row.grid_columnconfigure((0, 1), weight=1)
+
+        disk_card = self._make_metric_card(mid_row, col=0, icon="💿", title="Disco")
+        net_card = self._make_metric_card(mid_row, col=1, icon="🌐", title="Red")
+
+        self._perf_widgets["disk_read"] = self._add_sub_label(disk_card, "Lectura:  -- MB/s")
+        self._perf_widgets["disk_write"] = self._add_sub_label(disk_card, "Escritura: -- MB/s")
+
+        self._perf_widgets["net_recv"] = self._add_sub_label(net_card, "Descarga: -- MB/s")
+        self._perf_widgets["net_sent"] = self._add_sub_label(net_card, "Subida:   -- MB/s")
+
+        # ── Tabla de procesos top ───────────────────────────────────────────
+        proc_card = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        proc_card.grid(row=3, column=0, padx=20, pady=(4, 16), sticky="ew")
+        proc_card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            proc_card, text="🔝  Procesos con Mayor Consumo de CPU",
+            font=("Segoe UI", 12, "bold"), text_color=COLOR_TEXT,
+        ).pack(anchor="w", padx=16, pady=(10, 6))
+
+        self._perf_widgets["proc_frame"] = ctk.CTkFrame(proc_card, fg_color="transparent")
+        self._perf_widgets["proc_frame"].pack(fill="x", padx=16, pady=(0, 12))
+        self._perf_widgets["proc_labels"] = []
+        for _ in range(5):
+            lbl = ctk.CTkLabel(
+                self._perf_widgets["proc_frame"],
+                text="—",
+                font=FONT_CODE,
+                text_color=COLOR_MUTED,
+                anchor="w",
+            )
+            lbl.pack(fill="x", pady=1)
+            self._perf_widgets["proc_labels"].append(lbl)
+
+    def _make_metric_card(self, parent, col: int, icon: str, title: str) -> ctk.CTkFrame:
+        card = ctk.CTkFrame(parent, fg_color=COLOR_CARD, corner_radius=10)
+        card.grid(row=0, column=col, padx=6, pady=4, sticky="nsew")
+        card.grid_columnconfigure(0, weight=1)
+        title_row = ctk.CTkFrame(card, fg_color="transparent")
+        title_row.pack(fill="x", padx=16, pady=(12, 6))
+        ctk.CTkLabel(title_row, text=f"{icon}  {title}",
+                     font=("Segoe UI", 13, "bold"), text_color=COLOR_TEXT).pack(anchor="w")
+        return card
+
+    def _add_gauge(self, parent, label: str, color: str) -> ctk.CTkProgressBar:
+        bar = ctk.CTkProgressBar(parent, progress_color=color, fg_color=COLOR_BORDER, height=14, corner_radius=6)
+        bar.pack(fill="x", padx=16, pady=(0, 2))
+        bar.set(0)
+        return bar
+
+    def _add_gauge_label(self, parent) -> ctk.CTkLabel:
+        lbl = ctk.CTkLabel(parent, text="0%", font=("Segoe UI", 20, "bold"), text_color=COLOR_ACCENT)
+        lbl.pack(anchor="w", padx=16, pady=(0, 4))
+        return lbl
+
+    def _add_sub_label(self, parent, text: str) -> ctk.CTkLabel:
+        lbl = ctk.CTkLabel(parent, text=text, font=FONT_SMALL, text_color=COLOR_MUTED, anchor="w")
+        lbl.pack(anchor="w", padx=16, pady=2)
+        return lbl
+
+    def _on_perf_update(self, snap: PerformanceSnapshot) -> None:
+        """Callback llamado por PerformanceMonitor cada 2s. Actualiza widgets (thread-safe)."""
+        def _update():
+            if self._current_section != "monitor":
+                return
+            w = self._perf_widgets
+            if not w:
+                return
+            try:
+                # CPU
+                cpu_pct = snap.cpu_percent
+                color_cpu = COLOR_DANGER if cpu_pct > 80 else COLOR_WARNING if cpu_pct > 50 else COLOR_ACCENT
+                w["cpu_bar"].set(cpu_pct / 100)
+                w["cpu_bar"].configure(progress_color=color_cpu)
+                w["cpu_label"].configure(text=f"{cpu_pct:.0f}%", text_color=color_cpu)
+                freq_text = f"Frecuencia: {snap.cpu_freq_mhz:.0f} MHz" if snap.cpu_freq_mhz else "Frecuencia: --"
+                w["cpu_freq"].configure(text=freq_text)
+                w["cpu_cores"].configure(text=f"Nucleos logicos: {snap.cpu_cores_logical}")
+
+                # RAM
+                ram_pct = snap.ram_percent
+                color_ram = COLOR_DANGER if ram_pct > 85 else COLOR_WARNING if ram_pct > 60 else COLOR_ACCENT2
+                w["ram_bar"].set(ram_pct / 100)
+                w["ram_bar"].configure(progress_color=color_ram)
+                w["ram_label"].configure(text=f"{ram_pct:.0f}%", text_color=color_ram)
+                w["ram_detail"].configure(text=f"{snap.ram_used_gb} / {snap.ram_total_gb} GB en uso")
+
+                # Disco
+                w["disk_read"].configure(text=f"Lectura:   {snap.disk_read_mbps:.2f} MB/s")
+                w["disk_write"].configure(text=f"Escritura: {snap.disk_write_mbps:.2f} MB/s")
+
+                # Red
+                w["net_recv"].configure(text=f"Descarga: {snap.net_recv_mbps:.2f} MB/s")
+                w["net_sent"].configure(text=f"Subida:   {snap.net_sent_mbps:.2f} MB/s")
+
+                # Procesos
+                for i, lbl in enumerate(w["proc_labels"]):
+                    if i < len(snap.top_processes):
+                        p = snap.top_processes[i]
+                        name = p["name"][:28].ljust(28)
+                        lbl.configure(
+                            text=f"{i+1}. {name}  CPU: {p['cpu']:5.1f}%   RAM: {p['ram_mb']:6.1f} MB",
+                            text_color=COLOR_TEXT,
+                        )
+                    else:
+                        lbl.configure(text="—", text_color=COLOR_MUTED)
+            except Exception:
+                pass
+        self.after(0, _update)
+
+    # ─── PANEL DE ACTIVIDAD ───────────────────────────────────────────────────
+
+    def _build_activity_section(self) -> None:
+        frame = self._make_section_frame("activity")
+        frame.grid_columnconfigure(0, weight=1)
+
+        # ── Header ──────────────────────────────────────────────────────────
+        hdr = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        hdr.grid(row=0, column=0, padx=20, pady=(16, 8), sticky="ew")
+        hdr.grid_columnconfigure(0, weight=1)
+
+        title_row = ctk.CTkFrame(hdr, fg_color="transparent")
+        title_row.pack(fill="x", padx=16, pady=(12, 8))
+        title_row.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            title_row, text="⚡ Panel de Optimizaciones",
+            font=FONT_HEADING, text_color=COLOR_ACCENT,
+        ).grid(row=0, column=0, sticky="w")
+
+        ctk.CTkButton(
+            title_row, text="🔄 Actualizar",
+            font=FONT_SMALL, fg_color=COLOR_ACCENT2, hover_color="#2563eb",
+            text_color=COLOR_TEXT, width=110, height=28,
+            command=self._refresh_activity,
+        ).grid(row=0, column=1, padx=4)
+
+        ctk.CTkButton(
+            title_row, text="🗑 Limpiar sesión",
+            font=FONT_SMALL, fg_color="#374151", hover_color="#4b5563",
+            text_color=COLOR_TEXT, width=120, height=28,
+            command=self._clear_activity,
+        ).grid(row=0, column=2, padx=4)
+
+        # ── Estadísticas rápidas ─────────────────────────────────────────────
+        self._activity_stats_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        self._activity_stats_frame.grid(row=1, column=0, padx=20, pady=4, sticky="ew")
+        self._activity_stats_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        self._activity_stat_cards: list[ctk.CTkLabel] = []
+        for col, (icon, label) in enumerate([
+            ("✅", "Exitosas"), ("❌", "Con error"), ("📂", "Categorías"), ("🕐", "Ultima optimiz.")
+        ]):
+            card = ctk.CTkFrame(self._activity_stats_frame, fg_color=COLOR_CARD, corner_radius=8)
+            card.grid(row=0, column=col, padx=5, pady=4, sticky="ew")
+            ctk.CTkLabel(card, text=icon, font=("Segoe UI", 20)).pack(pady=(8, 2))
+            val_lbl = ctk.CTkLabel(card, text="—", font=("Segoe UI", 16, "bold"), text_color=COLOR_TEXT)
+            val_lbl.pack()
+            ctk.CTkLabel(card, text=label, font=FONT_SMALL, text_color=COLOR_MUTED).pack(pady=(0, 8))
+            self._activity_stat_cards.append(val_lbl)
+
+        # ── Filtros ──────────────────────────────────────────────────────────
+        filter_row = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=8)
+        filter_row.grid(row=2, column=0, padx=20, pady=4, sticky="ew")
+
+        ctk.CTkLabel(
+            filter_row, text="Filtrar por categoría:",
+            font=FONT_SMALL, text_color=COLOR_MUTED,
+        ).pack(side="left", padx=(16, 8), pady=8)
+
+        self._activity_filter = ctk.StringVar(value="Todas")
+        self._activity_filter_menu = ctk.CTkOptionMenu(
+            filter_row,
+            variable=self._activity_filter,
+            values=["Todas", "services", "registry", "power", "cleanup", "network", "visual"],
+            font=FONT_SMALL,
+            fg_color=COLOR_BORDER,
+            button_color=COLOR_ACCENT2,
+            text_color=COLOR_TEXT,
+            width=160,
+            command=lambda _: self._refresh_activity(),
+        )
+        self._activity_filter_menu.pack(side="left", padx=4, pady=8)
+
+        self._activity_show_errors = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            filter_row, text="Solo errores",
+            variable=self._activity_show_errors,
+            font=FONT_SMALL, text_color=COLOR_MUTED,
+            checkbox_width=18, checkbox_height=18,
+            fg_color=COLOR_DANGER, hover_color="#dc2626",
+            command=self._refresh_activity,
+        ).pack(side="left", padx=16, pady=8)
+
+        # ── Lista de actividad ───────────────────────────────────────────────
+        self._activity_list_frame = ctk.CTkScrollableFrame(
+            frame, fg_color=COLOR_BG, corner_radius=0,
+            scrollbar_button_color=COLOR_BORDER,
+        )
+        self._activity_list_frame.grid(row=3, column=0, padx=20, pady=(4, 16), sticky="nsew")
+        self._activity_list_frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(3, weight=1)
+
+        self._activity_placeholder = ctk.CTkLabel(
+            self._activity_list_frame,
+            text="No hay optimizaciones registradas en esta sesión.\n\n"
+                 "Aplica optimizaciones con el botón '🚀 Aplicar Todo' para verlas aquí.",
+            font=FONT_BODY, text_color=COLOR_MUTED,
+            wraplength=500,
+        )
+        self._activity_placeholder.pack(pady=40)
+
+    def _refresh_activity(self) -> None:
+        """Reconstruye la lista de optimizaciones en el panel de actividad."""
+        changes = self.tracker.get_session_changes()
+
+        # Filtrar
+        cat_filter = self._activity_filter.get() if hasattr(self, "_activity_filter") else "Todas"
+        only_errors = self._activity_show_errors.get() if hasattr(self, "_activity_show_errors") else False
+
+        filtered = changes
+        if cat_filter != "Todas":
+            filtered = [c for c in filtered if c.get("category", "") == cat_filter]
+        if only_errors:
+            filtered = [c for c in filtered if c.get("status") != "success"]
+
+        # Estadísticas
+        total_ok = sum(1 for c in changes if c.get("status") == "success")
+        total_err = sum(1 for c in changes if c.get("status") != "success")
+        cats = set(c.get("category", "?") for c in changes)
+        last_ts = changes[-1]["timestamp"][:16].replace("T", " ") if changes else "—"
+
+        if hasattr(self, "_activity_stat_cards") and len(self._activity_stat_cards) == 4:
+            self._activity_stat_cards[0].configure(text=str(total_ok), text_color=COLOR_SUCCESS)
+            self._activity_stat_cards[1].configure(text=str(total_err),
+                                                    text_color=COLOR_DANGER if total_err else COLOR_MUTED)
+            self._activity_stat_cards[2].configure(text=str(len(cats)), text_color=COLOR_ACCENT2)
+            self._activity_stat_cards[3].configure(text=last_ts, text_color=COLOR_TEXT)
+
+        # Limpiar lista
+        if hasattr(self, "_activity_list_frame"):
+            for w in self._activity_list_frame.winfo_children():
+                w.destroy()
+
+            if not filtered:
+                msg = "No hay registros que coincidan con el filtro." if changes else (
+                    "No hay optimizaciones registradas en esta sesión.\n\n"
+                    "Aplica optimizaciones con el botón '🚀 Aplicar Todo' para verlas aquí."
+                )
+                ctk.CTkLabel(
+                    self._activity_list_frame, text=msg,
+                    font=FONT_BODY, text_color=COLOR_MUTED, wraplength=500,
+                ).pack(pady=40)
+                return
+
+            CATEGORY_COLORS = {
+                "services": COLOR_ACCENT2,
+                "registry": COLOR_WARNING,
+                "power": "#f97316",
+                "cleanup": COLOR_SUCCESS,
+                "network": "#a78bfa",
+                "visual": "#ec4899",
+            }
+
+            for i, change in enumerate(reversed(filtered)):
+                status = change.get("status", "success")
+                is_ok = status == "success"
+                ts = change.get("timestamp", "")[:19].replace("T", " ")
+                cat = change.get("category", "?")
+                desc = change.get("description", "")
+                cat_color = CATEGORY_COLORS.get(cat, COLOR_ACCENT)
+                border = COLOR_SUCCESS if is_ok else COLOR_DANGER
+
+                row = ctk.CTkFrame(
+                    self._activity_list_frame,
+                    fg_color=COLOR_CARD, corner_radius=8,
+                    border_width=1, border_color=border,
+                )
+                row.pack(fill="x", padx=4, pady=3)
+                row.grid_columnconfigure(1, weight=1)
+
+                # Icono estado
+                icon = "✅" if is_ok else "❌"
+                ctk.CTkLabel(
+                    row, text=icon, font=("Segoe UI", 16), width=30,
+                ).grid(row=0, column=0, rowspan=2, padx=(12, 4), pady=8)
+
+                # Descripción
+                ctk.CTkLabel(
+                    row, text=desc, font=FONT_BODY, text_color=COLOR_TEXT,
+                    anchor="w", wraplength=500,
+                ).grid(row=0, column=1, padx=4, pady=(8, 2), sticky="w")
+
+                # Metadatos
+                meta_row = ctk.CTkFrame(row, fg_color="transparent")
+                meta_row.grid(row=1, column=1, padx=4, pady=(0, 8), sticky="w")
+
+                ctk.CTkLabel(
+                    meta_row, text=f" {cat} ",
+                    font=FONT_SMALL, text_color="#000",
+                    fg_color=cat_color, corner_radius=4,
+                ).pack(side="left", padx=(0, 6))
+
+                ctk.CTkLabel(
+                    meta_row, text=ts, font=FONT_SMALL, text_color=COLOR_MUTED,
+                ).pack(side="left")
+
+    def _clear_activity(self) -> None:
+        """Limpia el historial de la sesión actual."""
+        from tkinter import messagebox as _mb
+        if not self.tracker.get_session_changes():
+            _mb.showinfo("Sin cambios", "No hay cambios en la sesión actual.")
+            return
+        if _mb.askyesno("Limpiar sesión", "¿Borrar el historial de esta sesión?\n(Los logs en disco se mantienen)"):
+            self.tracker.clear_session()
+            self._refresh_activity()
+
+    def _add_activity_entry(self, category: str, description: str, status: str = "success") -> None:
+        """Registra una optimización en curso para el panel de actividad."""
+        self.tracker.record(category, "optimize", description, status=status)
+        if self._current_section == "activity":
+            self.after(0, self._refresh_activity)
+
     def _build_log_section(self) -> None:
         frame = self._make_section_frame("log")
 
@@ -935,21 +1329,35 @@ class WinOptimizerApp(ctk.CTk):
         # Actualizar título del header
         titles = {
             "dashboard": "🏠  Dashboard",
+            "monitor": "📊  Monitor de Rendimiento",
+            "activity": "⚡  Panel de Actividad",
             "services": "⚙️  Servicios",
             "registry": "🔧  Registro de Windows",
             "power": "⚡  Plan de Energía",
             "cleanup": "🧹  Limpieza del Sistema",
             "network": "🌐  Optimización de Red",
             "visual": "👁  Efectos Visuales",
-            "log": "📋  Registro de Cambios",
+            "log": "📋  Historial de Cambios",
             "ai": "🤖  Asistente IA",
         }
         self._section_title.configure(text=titles.get(section_id, section_id.title()))
         self._current_section = section_id
 
+        # Arrancar monitor si se entra a esa sección, parar si se sale
+        if section_id == "monitor":
+            if not self._perf_monitor._running:
+                self._perf_monitor.start()
+        else:
+            if section_id != "monitor":
+                self._perf_monitor.stop()
+
         # Si va al log, actualizarlo
         if section_id == "log":
             self._refresh_log()
+
+        # Si va a actividad, refrescar
+        if section_id == "activity":
+            self._refresh_activity()
 
     # ─── ACCIONES ─────────────────────────────────────────────────────────────
 
@@ -1165,6 +1573,8 @@ class WinOptimizerApp(ctk.CTk):
         finally:
             self._optimization_running = False
             self.after(0, lambda: self._set_buttons_state(True))
+            # Refrescar panel de actividad automáticamente
+            self.after(100, self._refresh_activity)
 
         # Mostrar resultado
         self.after(0, lambda: messagebox.showinfo(
