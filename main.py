@@ -41,6 +41,7 @@ from optimizer.network import NetworkOptimizer
 from optimizer.visual import VisualOptimizer
 from optimizer.ai_assistant import AIAssistant
 from optimizer.performance_monitor import PerformanceMonitor, PerformanceSnapshot
+from optimizer.supabase_agent import SupabaseAgent
 
 logger = setup_logger("WinOptimizer")
 
@@ -84,6 +85,11 @@ class WinOptimizerApp(ctk.CTk):
         self._checkboxes: dict[str, ctk.CTkCheckBox] = {}
         self._section_frames: dict[str, ctk.CTkFrame] = {}
         self._nav_buttons: dict[str, ctk.CTkButton] = {}
+
+        # SaaS connection
+        self._saas_token: Optional[str] = None
+        self._saas_agent: Optional[SupabaseAgent] = None
+        self._saas_email: str = ""
 
         # Monitor de rendimiento
         self._perf_monitor = PerformanceMonitor(interval=2.0, on_update=self._on_perf_update)
@@ -355,6 +361,9 @@ class WinOptimizerApp(ctk.CTk):
         self._build_log_section()
         self._build_ai_section()
 
+        # Habilitar scroll con rueda del ratón en todas las secciones (fix Windows)
+        self.after(200, self._setup_all_mousewheel)
+
     def _build_status_bar(self) -> None:
         """Barra de estado inferior con barra de progreso."""
         status_bar = ctk.CTkFrame(self, fg_color="#111827", height=50, corner_radius=0)
@@ -386,13 +395,38 @@ class WinOptimizerApp(ctk.CTk):
         frame = ctk.CTkScrollableFrame(
             self._content_area,
             fg_color=COLOR_BG,
-            scrollbar_button_color=COLOR_BORDER,
+            scrollbar_button_color="#4a5568",
+            scrollbar_button_hover_color=COLOR_ACCENT,
             corner_radius=0,
         )
         frame.grid(row=0, column=0, sticky="nsew")
         frame.grid_columnconfigure(0, weight=1)
         self._section_frames[name] = frame
         return frame
+
+    def _bind_mousewheel(self, scroll_frame: ctk.CTkScrollableFrame) -> None:
+        """Enlaza el scroll de la rueda del ratón a todos los hijos (fix Windows)."""
+        canvas = getattr(scroll_frame, "_parent_canvas", None)
+        if canvas is None:
+            return
+
+        def _on_wheel(event):
+            canvas.yview_scroll(-int(event.delta / 120), "units")
+
+        def _bind_recursive(widget):
+            try:
+                widget.bind("<MouseWheel>", _on_wheel, add="+")
+            except Exception:
+                pass
+            for child in widget.winfo_children():
+                _bind_recursive(child)
+
+        _bind_recursive(scroll_frame)
+
+    def _setup_all_mousewheel(self) -> None:
+        """Aplica el binding de mousewheel a todas las secciones."""
+        for frame in self._section_frames.values():
+            self._bind_mousewheel(frame)
 
     def _build_dashboard(self) -> None:
         frame = self._make_section_frame("dashboard")
@@ -503,6 +537,74 @@ class WinOptimizerApp(ctk.CTk):
                         anchor="w").pack(side="left", padx=8)
 
         ctk.CTkLabel(summary_frame, text="").pack(pady=4)
+
+        # ── Conectar con Dashboard SaaS ──────────────────────────────────────
+        saas_card = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=12,
+                                  border_width=1, border_color="#00d4aa33")
+        saas_card.grid(row=4, column=0, padx=20, pady=(10, 20), sticky="ew")
+        saas_card.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            saas_card,
+            text="☁  Dashboard SaaS — Diagnóstico con IA",
+            font=FONT_HEADING, text_color=COLOR_ACCENT,
+        ).grid(row=0, column=0, columnspan=3, padx=16, pady=(14, 4), sticky="w")
+
+        ctk.CTkLabel(
+            saas_card,
+            text="Conecta tu cuenta para enviar métricas y ver resultados en el dashboard web.",
+            font=FONT_BODY, text_color=COLOR_MUTED,
+        ).grid(row=1, column=0, columnspan=3, padx=16, pady=(0, 10), sticky="w")
+
+        # Fila email
+        ctk.CTkLabel(saas_card, text="Email:", font=FONT_BODY,
+                     text_color=COLOR_TEXT, width=65, anchor="w",
+                     ).grid(row=2, column=0, padx=(16, 4), pady=4, sticky="w")
+        self._saas_email_var = ctk.StringVar()
+        ctk.CTkEntry(saas_card, textvariable=self._saas_email_var,
+                     font=FONT_BODY, fg_color="#0d1117", text_color=COLOR_TEXT,
+                     border_color=COLOR_BORDER, placeholder_text="tu@email.com",
+                     height=34,
+                     ).grid(row=2, column=1, padx=4, pady=4, sticky="ew")
+
+        # Fila password
+        ctk.CTkLabel(saas_card, text="Clave:", font=FONT_BODY,
+                     text_color=COLOR_TEXT, width=65, anchor="w",
+                     ).grid(row=3, column=0, padx=(16, 4), pady=4, sticky="w")
+        self._saas_pass_var = ctk.StringVar()
+        ctk.CTkEntry(saas_card, textvariable=self._saas_pass_var,
+                     font=FONT_BODY, fg_color="#0d1117", text_color=COLOR_TEXT,
+                     border_color=COLOR_BORDER, placeholder_text="contraseña",
+                     show="*", height=34,
+                     ).grid(row=3, column=1, padx=4, pady=4, sticky="ew")
+
+        # Botones
+        btn_row = ctk.CTkFrame(saas_card, fg_color="transparent")
+        btn_row.grid(row=4, column=0, columnspan=3, padx=16, pady=(8, 4), sticky="ew")
+
+        self._saas_connect_btn = ctk.CTkButton(
+            btn_row, text="Conectar", font=FONT_BODY,
+            fg_color=COLOR_ACCENT2, hover_color="#2563eb",
+            text_color=COLOR_TEXT, width=110, height=36,
+            command=self._saas_login,
+        )
+        self._saas_connect_btn.pack(side="left", padx=(0, 8))
+
+        self._saas_diag_btn = ctk.CTkButton(
+            btn_row, text="Enviar Diagnóstico IA",
+            font=FONT_BODY, fg_color=COLOR_ACCENT, hover_color="#00b894",
+            text_color="#000000", width=180, height=36,
+            state="disabled", command=self._saas_diagnose,
+        )
+        self._saas_diag_btn.pack(side="left")
+
+        self._saas_status_lbl = ctk.CTkLabel(
+            saas_card, text="No conectado",
+            font=FONT_SMALL, text_color=COLOR_MUTED,
+        )
+        self._saas_status_lbl.grid(row=5, column=0, columnspan=3,
+                                    padx=16, pady=(4, 14), sticky="w")
+
 
     def _build_services_section(self) -> None:
         frame = self._make_section_frame("services")
@@ -1127,11 +1229,12 @@ class WinOptimizerApp(ctk.CTk):
         # ── Lista de actividad ───────────────────────────────────────────────
         self._activity_list_frame = ctk.CTkScrollableFrame(
             frame, fg_color=COLOR_BG, corner_radius=0,
-            scrollbar_button_color=COLOR_BORDER,
+            scrollbar_button_color="#4a5568",
+            scrollbar_button_hover_color=COLOR_ACCENT,
+            height=340,
         )
-        self._activity_list_frame.grid(row=3, column=0, padx=20, pady=(4, 16), sticky="nsew")
+        self._activity_list_frame.grid(row=3, column=0, padx=20, pady=(4, 16), sticky="ew")
         self._activity_list_frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(3, weight=1)
 
         self._activity_placeholder = ctk.CTkLabel(
             self._activity_list_frame,
@@ -1237,6 +1340,10 @@ class WinOptimizerApp(ctk.CTk):
                     meta_row, text=ts, font=FONT_SMALL, text_color=COLOR_MUTED,
                 ).pack(side="left")
 
+            # Re-enlazar mousewheel para children dinámicos
+            if "activity" in self._section_frames:
+                self.after(50, lambda: self._bind_mousewheel(self._section_frames["activity"]))
+
     def _clear_activity(self) -> None:
         """Limpia el historial de la sesión actual."""
         from tkinter import messagebox as _mb
@@ -1287,8 +1394,7 @@ class WinOptimizerApp(ctk.CTk):
             corner_radius=8,
             height=400,
         )
-        self._log_text.grid(row=1, column=0, padx=20, pady=10, sticky="nsew")
-        frame.grid_rowconfigure(1, weight=1)
+        self._log_text.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
 
         # Directorio de logs
         log_dir_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=8)
@@ -1748,9 +1854,9 @@ class WinOptimizerApp(ctk.CTk):
             frame, font=("Consolas", 10),
             fg_color="#0d1117", text_color=COLOR_TEXT,
             corner_radius=8, state="disabled",
+            height=360,
         )
-        self._ai_chat.grid(row=2, column=0, padx=20, pady=(0, 8), sticky="nsew")
-        frame.grid_rowconfigure(2, weight=1)
+        self._ai_chat.grid(row=2, column=0, padx=20, pady=(0, 8), sticky="ew")
 
         self._ai_chat.configure(state="normal")
         self._ai_chat.insert("0.0", "Bienvenido al Asistente IA de WinOptimizer Pro.\n"
@@ -1843,6 +1949,100 @@ class WinOptimizerApp(ctk.CTk):
         self._ai_chat.delete("0.0", "end")
         self._ai_chat.insert("0.0", "Chat limpiado. Inicia una nueva conversacion.\n" + "─" * 60 + "\n")
         self._ai_chat.configure(state="disabled")
+
+    # ─── SaaS Integration ────────────────────────────────────────────────────
+
+    def _saas_login(self) -> None:
+        """Autentica con el SaaS y obtiene el token JWT."""
+        import requests as _req
+        email = self._saas_email_var.get().strip()
+        password = self._saas_pass_var.get().strip()
+        if not email or not password:
+            messagebox.showwarning("Faltan datos", "Ingresa tu email y contraseña.")
+            return
+
+        self._saas_connect_btn.configure(state="disabled", text="Conectando...")
+        self._saas_status_lbl.configure(text="Conectando...", text_color=COLOR_MUTED)
+
+        def _task():
+            try:
+                resp = _req.post(
+                    "https://win-optimizer-saas.vercel.app/api/auth/login",
+                    json={"email": email, "password": password},
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    self._saas_token = data["access_token"]
+                    self._saas_email = data["user"]["email"]
+                    self._saas_agent = SupabaseAgent(
+                        user_token=self._saas_token,
+                        device_name=self.system_info.get("product_name", "PC"),
+                    )
+                    self.after(0, lambda: self._saas_status_lbl.configure(
+                        text=f"Conectado como: {self._saas_email}", text_color=COLOR_SUCCESS))
+                    self.after(0, lambda: self._saas_diag_btn.configure(state="normal"))
+                    self.after(0, lambda: self._saas_connect_btn.configure(
+                        state="normal", text="Reconectar"))
+                else:
+                    msg = resp.json().get("error", "Error desconocido")
+                    self.after(0, lambda: self._saas_status_lbl.configure(
+                        text=f"Error: {msg}", text_color=COLOR_DANGER))
+                    self.after(0, lambda: self._saas_connect_btn.configure(
+                        state="normal", text="Conectar"))
+            except Exception as e:
+                self.after(0, lambda: self._saas_status_lbl.configure(
+                    text=f"Sin conexión: {e}", text_color=COLOR_DANGER))
+                self.after(0, lambda: self._saas_connect_btn.configure(
+                    state="normal", text="Conectar"))
+
+        threading.Thread(target=_task, daemon=True).start()
+
+    def _saas_diagnose(self) -> None:
+        """Envía métricas al SaaS y muestra el plan de diagnóstico IA."""
+        if not self._saas_agent:
+            return
+
+        self._saas_diag_btn.configure(state="disabled", text="Analizando...")
+        self._saas_status_lbl.configure(
+            text="Recolectando métricas y enviando diagnóstico...", text_color=COLOR_MUTED)
+
+        def _task():
+            result = self._saas_agent.run_diagnostic()
+            if not result:
+                self.after(0, lambda: self._saas_status_lbl.configure(
+                    text="Error: sin créditos o fallo de conexión.", text_color=COLOR_DANGER))
+                self.after(0, lambda: self._saas_diag_btn.configure(
+                    state="normal", text="Enviar Diagnóstico IA"))
+                return
+
+            plan = result["plan"]
+            summary = plan.get("summary", "")
+            score = plan.get("score", "?")
+            steps = plan.get("steps", [])
+
+            lines = [
+                f"DIAGNÓSTICO IA — Score: {score}/100",
+                f"Resumen: {summary}",
+                "─" * 50,
+            ]
+            for i, step in enumerate(steps, 1):
+                lines.append(
+                    f"Paso {i}: {step.get('action', '')} "
+                    f"[Riesgo: {step.get('risk_level', '?').upper()}]"
+                )
+                lines.append(f"  {step.get('justification', '')}")
+                if step.get("command"):
+                    lines.append(f"  CMD: {step['command']}")
+            msg = "\n".join(lines)
+
+            self.after(0, lambda: self._saas_status_lbl.configure(
+                text=f"Diagnóstico completado — Score: {score}/100", text_color=COLOR_SUCCESS))
+            self.after(0, lambda: self._saas_diag_btn.configure(
+                state="normal", text="Enviar Diagnóstico IA"))
+            self.after(0, lambda: messagebox.showinfo("Diagnóstico IA", msg))
+
+        threading.Thread(target=_task, daemon=True).start()
 
 
 def main() -> None:
