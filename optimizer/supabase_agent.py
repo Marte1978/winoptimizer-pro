@@ -23,6 +23,15 @@ from optimizer.performance_monitor import PerformanceMonitor, PerformanceSnapsho
 
 logger = logging.getLogger("WinOptimizer.SupabaseAgent")
 
+
+class SessionExpiredError(Exception):
+    """Token JWT expirado — el usuario debe reconectarse."""
+
+
+class InsufficientCreditsError(Exception):
+    """El usuario no tiene créditos suficientes."""
+
+
 # ─── Configuración ────────────────────────────────────────────────────────────
 SAAS_BASE_URL = "https://win-optimizer-saas.vercel.app"
 REQUEST_TIMEOUT = 30  # segundos
@@ -170,15 +179,25 @@ class SupabaseAgent:
         })
 
     def _post(self, endpoint: str, payload: dict) -> Optional[dict]:
-        """Hace POST al SaaS API con manejo de errores."""
+        """Hace POST al SaaS API con manejo de errores.
+
+        Raises:
+            SessionExpiredError: Si el token JWT expiró (401).
+            InsufficientCreditsError: Si no hay créditos (402).
+        """
         url = f"{SAAS_BASE_URL}{endpoint}"
         try:
             resp = self._session.post(url, json=payload, timeout=REQUEST_TIMEOUT)
+            if resp.status_code == 401:
+                logger.warning("Token expirado o no autorizado. El usuario debe reconectarse.")
+                raise SessionExpiredError("Sesión expirada")
             if resp.status_code == 402:
                 logger.warning("Créditos insuficientes para esta operación.")
-                return None
+                raise InsufficientCreditsError("Sin créditos")
             resp.raise_for_status()
             return resp.json()
+        except (SessionExpiredError, InsufficientCreditsError):
+            raise
         except requests.exceptions.ConnectionError:
             logger.error(f"No se pudo conectar a {url}. ¿Hay conexión a internet?")
             return None
@@ -265,6 +284,8 @@ class SupabaseAgent:
 
             return {"plan": plan, "log_id": log_id, "metrics": metrics}
 
+        except (SessionExpiredError, InsufficientCreditsError):
+            raise
         except Exception as e:
             logger.error(f"Error en diagnóstico completo: {e}")
             return None

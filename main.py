@@ -49,7 +49,7 @@ from optimizer.network import NetworkOptimizer
 from optimizer.visual import VisualOptimizer
 from optimizer.ai_assistant import AIAssistant
 from optimizer.performance_monitor import PerformanceMonitor, PerformanceSnapshot
-from optimizer.supabase_agent import SupabaseAgent
+from optimizer.supabase_agent import SupabaseAgent, SessionExpiredError, InsufficientCreditsError
 
 logger = setup_logger("WinOptimizer")
 
@@ -2025,10 +2025,25 @@ class WinOptimizerApp(ctk.CTk):
             text="Recolectando métricas y enviando diagnóstico...", text_color=COLOR_MUTED)
 
         def _task():
-            result = self._saas_agent.run_diagnostic()
+            try:
+                result = self._saas_agent.run_diagnostic()
+            except SessionExpiredError:
+                self.after(0, lambda: self._saas_status_lbl.configure(
+                    text="Sesión expirada — vuelve a conectarte.", text_color=COLOR_DANGER))
+                self.after(0, lambda: self._saas_diag_btn.configure(
+                    state="disabled", text="Enviar Diagnóstico IA"))
+                self.after(0, lambda: self._saas_connect_btn.configure(
+                    state="normal", text="Reconectar"))
+                return
+            except InsufficientCreditsError:
+                self.after(0, lambda: self._saas_status_lbl.configure(
+                    text="Sin créditos. Recarga en win-optimizer-saas.vercel.app", text_color=COLOR_DANGER))
+                self.after(0, lambda: self._saas_diag_btn.configure(
+                    state="normal", text="Enviar Diagnóstico IA"))
+                return
             if not result:
                 self.after(0, lambda: self._saas_status_lbl.configure(
-                    text="Error: sin créditos o fallo de conexión.", text_color=COLOR_DANGER))
+                    text="Error de conexión. Verifica tu internet.", text_color=COLOR_DANGER))
                 self.after(0, lambda: self._saas_diag_btn.configure(
                     state="normal", text="Enviar Diagnóstico IA"))
                 return
