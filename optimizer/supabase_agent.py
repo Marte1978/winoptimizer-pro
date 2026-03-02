@@ -269,6 +269,52 @@ class SupabaseAgent:
             logger.error(f"Error en diagnóstico completo: {e}")
             return None
 
+    def send_jobs(
+        self,
+        log_id: str,
+        applied_jobs: list[dict],
+        metrics_after: Optional[dict] = None,
+    ) -> bool:
+        """
+        Sincroniza los trabajos realizados con el dashboard SaaS.
+
+        Args:
+            log_id: ID del log obtenido en run_diagnostic().
+            applied_jobs: Lista de entradas del ChangeTracker.
+            metrics_after: Métricas del sistema tras la optimización (opcional).
+
+        Returns:
+            True si la sincronización fue exitosa.
+        """
+        if not applied_jobs:
+            logger.warning("send_jobs: lista de trabajos vacía, nada que sincronizar.")
+            return False
+
+        logger.info(f"Sincronizando {len(applied_jobs)} trabajos con el dashboard (log: {log_id})...")
+
+        payload: dict = {
+            "log_id": log_id,
+            "user_token": self.user_token,
+            "applied_jobs": applied_jobs,
+        }
+        if metrics_after:
+            payload["metrics_after"] = metrics_after
+
+        result = self._post("/api/jobs", payload)
+        if not result:
+            logger.error("No se pudo sincronizar los trabajos con el dashboard.")
+            return False
+
+        synced = result.get("jobs_synced", 0)
+        success = result.get("jobs_success", 0)
+        errors = result.get("jobs_error", 0)
+        score_after = result.get("score_after")
+        logger.info(
+            f"Trabajos sincronizados: {synced} total | {success} exitosos | {errors} con error"
+            + (f" | Score después: {score_after}" if score_after is not None else "")
+        )
+        return True
+
     def print_plan(self, plan: dict) -> None:
         """Imprime el plan de optimización en consola (útil para debug)."""
         print("\n" + "=" * 60)

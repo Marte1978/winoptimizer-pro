@@ -90,6 +90,7 @@ class WinOptimizerApp(ctk.CTk):
         self._saas_token: Optional[str] = None
         self._saas_agent: Optional[SupabaseAgent] = None
         self._saas_email: str = ""
+        self._saas_last_log_id: Optional[str] = None  # log_id del último diagnóstico
 
         # Monitor de rendimiento
         self._perf_monitor = PerformanceMonitor(interval=2.0, on_update=self._on_perf_update)
@@ -596,7 +597,15 @@ class WinOptimizerApp(ctk.CTk):
             text_color="#000000", width=180, height=36,
             state="disabled", command=self._saas_diagnose,
         )
-        self._saas_diag_btn.pack(side="left")
+        self._saas_diag_btn.pack(side="left", padx=(0, 8))
+
+        self._saas_sync_btn = ctk.CTkButton(
+            btn_row, text="Sincronizar Trabajos",
+            font=FONT_BODY, fg_color="#7c3aed", hover_color="#6d28d9",
+            text_color=COLOR_TEXT, width=175, height=36,
+            state="disabled", command=self._saas_sync_jobs,
+        )
+        self._saas_sync_btn.pack(side="left")
 
         self._saas_status_lbl = ctk.CTkLabel(
             saas_card, text="No conectado",
@@ -2017,9 +2026,13 @@ class WinOptimizerApp(ctk.CTk):
                 return
 
             plan = result["plan"]
+            log_id = result["log_id"]
             summary = plan.get("summary", "")
             score = plan.get("score", "?")
             steps = plan.get("steps", [])
+
+            # Guardar log_id para sincronización posterior
+            self._saas_last_log_id = log_id
 
             lines = [
                 f"DIAGNÓSTICO IA — Score: {score}/100",
@@ -2034,13 +2047,81 @@ class WinOptimizerApp(ctk.CTk):
                 lines.append(f"  {step.get('justification', '')}")
                 if step.get("command"):
                     lines.append(f"  CMD: {step['command']}")
+            lines.append("─" * 50)
+            lines.append("Aplica las optimizaciones y luego usa 'Sincronizar Trabajos'.")
             msg = "\n".join(lines)
 
             self.after(0, lambda: self._saas_status_lbl.configure(
                 text=f"Diagnóstico completado — Score: {score}/100", text_color=COLOR_SUCCESS))
             self.after(0, lambda: self._saas_diag_btn.configure(
                 state="normal", text="Enviar Diagnóstico IA"))
+            self.after(0, lambda: self._saas_sync_btn.configure(state="normal"))
             self.after(0, lambda: messagebox.showinfo("Diagnóstico IA", msg))
+
+        threading.Thread(target=_task, daemon=True).start()
+
+    def _saas_sync_jobs(self) -> None:
+        """Sincroniza los trabajos realizados en la sesión con el dashboard SaaS."""
+        if not self._saas_agent:
+            messagebox.showwarning("Sin conexión", "Conéctate al dashboard primero.")
+            return
+
+        if not self._saas_last_log_id:
+            messagebox.showwarning(
+                "Sin diagnóstico",
+                "Ejecuta un Diagnóstico IA primero para asociar los trabajos a un log.",
+            )
+            return
+
+        session_changes = self.tracker.get_session_changes()
+        if not session_changes:
+            messagebox.showinfo(
+                "Sin trabajos",
+                "No hay trabajos registrados en esta sesión.\n"
+                "Aplica alguna optimización primero.",
+            )
+            return
+
+        self._saas_sync_btn.configure(state="disabled", text="Sincronizando...")
+        self._saas_status_lbl.configure(
+            text=f"Sincronizando {len(session_changes)} trabajos...", text_color=COLOR_MUTED)
+
+        log_id_snapshot = self._saas_last_log_id
+
+        def _task():
+            # Recolectar métricas actuales (después de optimizar)
+            metrics_after = None
+            try:
+                metrics_after = self._saas_agent.collect_metrics()
+            except Exception:
+                pass  # métricas after son opcionales
+
+            ok = self._saas_agent.send_jobs(
+                log_id=log_id_snapshot,
+                applied_jobs=session_changes,
+                metrics_after=metrics_after,
+            )
+
+            if ok:
+                self.after(0, lambda: self._saas_status_lbl.configure(
+                    text=f"✓ {len(session_changes)} trabajos sincronizados con el dashboard.",
+                    text_color=COLOR_SUCCESS))
+                self.after(0, lambda: messagebox.showinfo(
+                    "Sincronización exitosa",
+                    f"{len(session_changes)} trabajos enviados al dashboard.\n"
+                    "Ya puedes verlos en win-optimizer-saas.vercel.app",
+                ))
+            else:
+                self.after(0, lambda: self._saas_status_lbl.configure(
+                    text="Error al sincronizar trabajos.", text_color=COLOR_DANGER))
+                self.after(0, lambda: messagebox.showerror(
+                    "Error de sincronización",
+                    "No se pudieron enviar los trabajos al dashboard.\n"
+                    "Verifica tu conexión a internet.",
+                ))
+
+            self.after(0, lambda: self._saas_sync_btn.configure(
+                state="normal", text="Sincronizar Trabajos"))
 
         threading.Thread(target=_task, daemon=True).start()
 
