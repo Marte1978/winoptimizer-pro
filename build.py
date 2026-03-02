@@ -118,6 +118,7 @@ def build(one_file: bool = True, debug: bool = False) -> None:
         "--hidden-import", "winreg",
         "--hidden-import", "psutil",
         "--collect-all", "psutil",
+        "--collect-data", "certifi",
         "--add-data", "optimizer;optimizer",
         "--add-data", "utils;utils",
     ]

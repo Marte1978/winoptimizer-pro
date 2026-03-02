@@ -7,6 +7,14 @@ Stack: Python 3.10+ | CustomTkinter | PowerShell Engine
 """
 import sys
 import os
+
+# Fix SSL certifi path when running as PyInstaller onefile bundle
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    _cert = os.path.join(sys._MEIPASS, "certifi", "cacert.pem")
+    if os.path.isfile(_cert):
+        os.environ["SSL_CERT_FILE"] = _cert
+        os.environ["REQUESTS_CA_BUNDLE"] = _cert
+
 import threading
 import logging
 from datetime import datetime
