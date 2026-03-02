@@ -541,7 +541,7 @@ class WinOptimizerApp(ctk.CTk):
 
         # ── Conectar con Dashboard SaaS ──────────────────────────────────────
         saas_card = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=12,
-                                  border_width=1, border_color="#00d4aa33")
+                                  border_width=1, border_color="#00d4aa")
         saas_card.grid(row=4, column=0, padx=20, pady=(10, 20), sticky="ew")
         saas_card.grid_columnconfigure(1, weight=1)
 
