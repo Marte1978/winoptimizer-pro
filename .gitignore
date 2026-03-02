@@ -12,7 +12,7 @@ build/
 version_info.txt
 
 # PyInstaller
-*.exe
+# *.exe incluido en el repo para descarga directa
 
 # Environments
 .env
