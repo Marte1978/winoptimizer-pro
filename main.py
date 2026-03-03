@@ -249,6 +249,7 @@ class WinOptimizerApp(ctk.CTk):
         nav_items = [
             ("dashboard", "🏠  Dashboard", "Vista general del sistema"),
             ("monitor", "📊  Monitor", "Rendimiento en tiempo real"),
+            ("diagnostics", "🔍  Diagnóstico", "Análisis completo del sistema"),
             ("activity", "⚡  Actividad", "Optimizaciones aplicadas"),
             ("services", "⚙️  Servicios", "Gestionar servicios de Windows"),
             ("registry", "🔧  Registro", "Tweaks del registro"),
@@ -360,6 +361,7 @@ class WinOptimizerApp(ctk.CTk):
         # Construir todas las secciones
         self._build_dashboard()
         self._build_monitor_section()
+        self._build_diagnostics_section()
         self._build_activity_section()
         self._build_services_section()
         self._build_registry_section()
@@ -1466,6 +1468,7 @@ class WinOptimizerApp(ctk.CTk):
         titles = {
             "dashboard": "🏠  Dashboard",
             "monitor": "📊  Monitor de Rendimiento",
+            "diagnostics": "🔍  Diagnóstico del Sistema",
             "activity": "⚡  Panel de Actividad",
             "services": "⚙️  Servicios",
             "registry": "🔧  Registro de Windows",
@@ -1792,6 +1795,367 @@ class WinOptimizerApp(ctk.CTk):
             "Se recomienda reiniciar el equipo.",
         ))
 
+
+    # ─── SECCIÓN DIAGNÓSTICO ─────────────────────────────────────────────────
+
+    def _build_diagnostics_section(self) -> None:
+        frame = self._make_section_frame("diagnostics")
+        frame.grid_columnconfigure(0, weight=1)
+
+        # Header card
+        header_card = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        header_card.grid(row=0, column=0, padx=20, pady=(16, 8), sticky="ew")
+        header_card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            header_card,
+            text="🔍 Diagnóstico del Sistema",
+            font=FONT_HEADING,
+            text_color=COLOR_ACCENT,
+        ).pack(anchor="w", padx=16, pady=(12, 2))
+        ctk.CTkLabel(
+            header_card,
+            text="Analiza 7 áreas clave de tu PC y genera un reporte completo.",
+            font=FONT_BODY,
+            text_color=COLOR_MUTED,
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        self._diag_run_btn = ctk.CTkButton(
+            header_card,
+            text="▶  Ejecutar Diagnóstico Completo",
+            font=("Segoe UI", 12, "bold"),
+            fg_color=COLOR_ACCENT,
+            hover_color="#00b894",
+            text_color="#000000",
+            height=40,
+            command=self._run_diagnostics_thread,
+        )
+        self._diag_run_btn.pack(anchor="w", padx=16, pady=(0, 12))
+
+        # Tarjeta de tareas
+        tasks_card = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        tasks_card.grid(row=1, column=0, padx=20, pady=(0, 8), sticky="ew")
+        tasks_card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            tasks_card,
+            text="Tareas de diagnóstico",
+            font=FONT_HEADING,
+            text_color=COLOR_TEXT,
+        ).pack(anchor="w", padx=16, pady=(12, 6))
+
+        self._diag_tasks = [
+            ("cmd1", "CMD 1: Diagnóstico de servicios críticos de Windows"),
+            ("cmd2", "CMD 2: Uso de recursos actuales (CPU, RAM, Disco)"),
+            ("cmd3", "CMD 3: Top procesos por CPU y RAM"),
+            ("cmd4", "CMD 4: Programas en inicio automático"),
+            ("cmd5", "CMD 5: Errores críticos en Event Viewer (últimas 24 h)"),
+            ("cmd6", "CMD 6: Estado del disco (SMART y sistema de archivos)"),
+            ("cmd7", "CMD 7: Drivers problemáticos y actualizaciones"),
+        ]
+
+        self._diag_status_labels: dict[str, ctk.CTkLabel] = {}
+        self._diag_row_frames: dict[str, ctk.CTkFrame] = {}
+
+        for task_id, task_name in self._diag_tasks:
+            row = ctk.CTkFrame(tasks_card, fg_color="#1e2a3a", corner_radius=6)
+            row.pack(fill="x", padx=12, pady=3)
+            row.grid_columnconfigure(1, weight=1)
+
+            status_lbl = ctk.CTkLabel(
+                row,
+                text="◻",
+                font=("Segoe UI", 14),
+                text_color=COLOR_MUTED,
+                width=30,
+            )
+            status_lbl.grid(row=0, column=0, padx=(12, 4), pady=8)
+
+            ctk.CTkLabel(
+                row,
+                text=task_name,
+                font=FONT_BODY,
+                text_color=COLOR_TEXT,
+                anchor="w",
+            ).grid(row=0, column=1, padx=4, pady=8, sticky="ew")
+
+            self._diag_status_labels[task_id] = status_lbl
+            self._diag_row_frames[task_id] = row
+
+        ctk.CTkFrame(tasks_card, height=1, fg_color="transparent").pack(pady=4)
+
+        # Tarjeta de resultados
+        results_card = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        results_card.grid(row=2, column=0, padx=20, pady=(0, 16), sticky="ew")
+        results_card.grid_columnconfigure(0, weight=1)
+
+        res_header = ctk.CTkFrame(results_card, fg_color="transparent")
+        res_header.pack(fill="x", padx=16, pady=(12, 4))
+        res_header.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            res_header,
+            text="📋 Resultados en tiempo real",
+            font=FONT_HEADING,
+            text_color=COLOR_TEXT,
+        ).grid(row=0, column=0, sticky="w")
+
+        self._diag_report_btn = ctk.CTkButton(
+            res_header,
+            text="📄 Ver Reporte Completo",
+            font=FONT_SMALL,
+            fg_color=COLOR_ACCENT2,
+            hover_color="#2563eb",
+            text_color=COLOR_TEXT,
+            height=30,
+            width=190,
+            state="disabled",
+            command=self._show_diag_report_window,
+        )
+        self._diag_report_btn.grid(row=0, column=1, sticky="e")
+
+        self._diag_result_text = ctk.CTkTextbox(
+            results_card,
+            font=FONT_CODE,
+            fg_color="#0d1117",
+            text_color=COLOR_TEXT,
+            height=300,
+            wrap="none",
+        )
+        self._diag_result_text.pack(fill="x", padx=16, pady=(4, 16))
+        self._diag_result_text.configure(state="disabled")
+
+        self._diag_running = False
+        self._diag_results_data: dict[str, str] = {}
+
+    def _run_diagnostics_thread(self) -> None:
+        if self._diag_running:
+            return
+        threading.Thread(target=self._run_diagnostics_task, daemon=True).start()
+
+    def _run_diagnostics_task(self) -> None:
+        from optimizer.core import PowerShellRunner
+        self._diag_running = True
+        self._diag_results_data = {}
+
+        self.after(0, lambda: self._diag_run_btn.configure(
+            state="disabled", text="⏳  Ejecutando diagnóstico..."
+        ))
+        self.after(0, lambda: self._diag_report_btn.configure(state="disabled"))
+        self.after(0, self._diag_clear_results)
+
+        for task_id, _ in self._diag_tasks:
+            self.after(0, lambda t=task_id: self._diag_set_status(t, "pending"))
+
+        ps = PowerShellRunner()
+
+        DIAG_COMMANDS: list[tuple[str, str, str]] = [
+            (
+                "cmd1",
+                "Servicios críticos de Windows detenidos",
+                r"Get-Service | Where-Object {$_.StartType -eq 'Automatic' -and $_.Status -ne 'Running'} | Select-Object Name, DisplayName, Status | Format-Table -AutoSize | Out-String -Width 120",
+            ),
+            (
+                "cmd2",
+                "Uso de recursos actuales (CPU, RAM, Disco)",
+                r"""$cpu = [math]::Round((Get-WmiObject Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average, 1); $os = Get-WmiObject Win32_OperatingSystem; $ramUsed = [math]::Round(($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / 1MB, 2); $ramTotal = [math]::Round($os.TotalVisibleMemorySize / 1MB, 2); $ramPct = [math]::Round($ramUsed / $ramTotal * 100, 1); Write-Host "--- CPU ---"; Write-Host "Uso actual: $cpu %"; Write-Host ""; Write-Host "--- RAM ---"; Write-Host "En uso: $ramUsed GB / $ramTotal GB  ($ramPct %)"; Write-Host ""; Write-Host "--- DISCOS ---"; Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3" | Select-Object DeviceID, @{N='Total(GB)';E={[math]::Round($_.Size/1GB,1)}}, @{N='Libre(GB)';E={[math]::Round($_.FreeSpace/1GB,1)}}, @{N='Usado%';E={[math]::Round((($_.Size-$_.FreeSpace)/$_.Size)*100,1)}} | Format-Table -AutoSize | Out-String -Width 120""",
+            ),
+            (
+                "cmd3",
+                "Top procesos por CPU y RAM",
+                r"Get-Process | Sort-Object CPU -Descending | Select-Object -First 15 Name, @{N='CPU(s)';E={[math]::Round($_.CPU,1)}}, @{N='RAM(MB)';E={[math]::Round($_.WorkingSet/1MB,1)}} | Format-Table -AutoSize | Out-String -Width 120",
+            ),
+            (
+                "cmd4",
+                "Programas en inicio automático",
+                r"Get-CimInstance Win32_StartupCommand | Select-Object Name, Location, User | Format-Table -AutoSize -Wrap | Out-String -Width 120",
+            ),
+            (
+                "cmd5",
+                "Errores críticos en Event Viewer (últimas 24 h)",
+                r"try { $s = (Get-Date).AddHours(-24); Get-EventLog -LogName System -EntryType Error -After $s -Newest 20 -ErrorAction Stop | Select-Object TimeGenerated, Source, @{N='Mensaje';E={$_.Message.Substring(0,[Math]::Min(80,$_.Message.Length))}} | Format-Table -AutoSize -Wrap | Out-String -Width 120 } catch { Write-Host 'Sin errores criticos en las ultimas 24 horas (o acceso denegado).' }",
+            ),
+            (
+                "cmd6",
+                "Estado del disco (SMART y sistema de archivos)",
+                r"Get-PhysicalDisk | Select-Object FriendlyName, MediaType, HealthStatus, OperationalStatus, @{N='Tamanio(GB)';E={[math]::Round($_.Size/1GB,1)}} | Format-Table -AutoSize | Out-String -Width 120",
+            ),
+            (
+                "cmd7",
+                "Drivers no firmados / problemáticos",
+                r"$drivers = Get-WmiObject Win32_PnPSignedDriver | Where-Object { $_.DeviceName -ne $null -and $_.IsSigned -ne $true }; if ($drivers) { $drivers | Select-Object DeviceName, DriverVersion, IsSigned | Select-Object -First 20 | Format-Table -AutoSize | Out-String -Width 120 } else { Write-Host 'Todos los drivers instalados estan firmados correctamente.' }",
+            ),
+        ]
+
+        for task_id, label, cmd in DIAG_COMMANDS:
+            self.after(0, lambda t=task_id: self._diag_set_status(t, "running"))
+            sep = "=" * 60
+            self.after(0, lambda l=label, s=sep: self._diag_append_result(
+                f"\n{s}\n  {l}\n{s}\n"
+            ))
+
+            ok, out, err = ps.run(cmd, timeout=60)
+            result = out if out.strip() else (err.strip() if err.strip() else "(sin resultados)")
+            self._diag_results_data[task_id] = result
+
+            self.after(0, lambda r=result: self._diag_append_result(r + "\n"))
+            self.after(0, lambda t=task_id, s=ok: self._diag_set_status(t, "done" if s else "error"))
+
+        self._diag_running = False
+        self.after(0, lambda: self._diag_run_btn.configure(
+            state="normal", text="▶  Ejecutar Diagnóstico Completo"
+        ))
+        self.after(0, lambda: self._diag_report_btn.configure(state="normal"))
+
+    def _diag_set_status(self, task_id: str, status: str) -> None:
+        lbl = self._diag_status_labels.get(task_id)
+        row = self._diag_row_frames.get(task_id)
+        if not lbl:
+            return
+        if status == "pending":
+            lbl.configure(text="◻", text_color=COLOR_MUTED)
+            if row:
+                row.configure(fg_color="#1e2a3a")
+        elif status == "running":
+            lbl.configure(text="◼", text_color=COLOR_WARNING)
+            if row:
+                row.configure(fg_color="#2d2a1a")
+        elif status == "done":
+            lbl.configure(text="✔", text_color=COLOR_SUCCESS)
+            if row:
+                row.configure(fg_color="#1a2d1a")
+        elif status == "error":
+            lbl.configure(text="✗", text_color=COLOR_DANGER)
+            if row:
+                row.configure(fg_color="#2d1a1a")
+
+    def _diag_clear_results(self) -> None:
+        self._diag_result_text.configure(state="normal")
+        self._diag_result_text.delete("1.0", "end")
+        self._diag_result_text.configure(state="disabled")
+
+    def _diag_append_result(self, text: str) -> None:
+        self._diag_result_text.configure(state="normal")
+        self._diag_result_text.insert("end", text)
+        self._diag_result_text.see("end")
+        self._diag_result_text.configure(state="disabled")
+
+    def _show_diag_report_window(self) -> None:
+        """Abre ventana de reporte completo en el escritorio."""
+        win = ctk.CTkToplevel(self)
+        win.title("📋 Reporte de Diagnóstico — WinOptimizer Pro")
+        win.geometry("960x720")
+        win.configure(fg_color=COLOR_BG)
+        win.grab_set()
+
+        win.update_idletasks()
+        x = (win.winfo_screenwidth() - 960) // 2
+        y = (win.winfo_screenheight() - 720) // 2
+        win.geometry(f"+{x}+{y}")
+
+        # Header
+        header = ctk.CTkFrame(win, fg_color="#111827", height=64, corner_radius=0)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+
+        ctk.CTkLabel(
+            header,
+            text="🔍 Reporte de Diagnóstico del Sistema",
+            font=FONT_HEADING,
+            text_color=COLOR_ACCENT,
+        ).pack(side="left", padx=24, pady=16)
+
+        ctk.CTkLabel(
+            header,
+            text=datetime.now().strftime("Generado: %d/%m/%Y  %H:%M"),
+            font=FONT_SMALL,
+            text_color=COLOR_MUTED,
+        ).pack(side="right", padx=24)
+
+        # Resumen de tareas (indicadores)
+        summary_frame = ctk.CTkFrame(win, fg_color=COLOR_CARD, corner_radius=0)
+        summary_frame.pack(fill="x", padx=0, pady=0)
+
+        inner = ctk.CTkFrame(summary_frame, fg_color="transparent")
+        inner.pack(fill="x", padx=16, pady=8)
+
+        for task_id, task_name in self._diag_tasks:
+            lbl = self._diag_status_labels.get(task_id)
+            icon = lbl.cget("text") if lbl else "◻"
+            color = lbl.cget("text_color") if lbl else COLOR_MUTED
+            row = ctk.CTkFrame(inner, fg_color="transparent")
+            row.pack(fill="x", pady=1)
+            ctk.CTkLabel(row, text=icon, font=("Segoe UI", 11), text_color=color, width=22).pack(side="left")
+            ctk.CTkLabel(row, text=task_name, font=FONT_SMALL, text_color=COLOR_TEXT).pack(side="left", padx=4)
+
+        # Contenido del reporte
+        self._diag_result_text.configure(state="normal")
+        content = self._diag_result_text.get("1.0", "end")
+        self._diag_result_text.configure(state="disabled")
+
+        full_text = (
+            f"REPORTE DE DIAGNÓSTICO — WinOptimizer Pro\n"
+            f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
+            f"{'=' * 80}\n\n" + content
+        )
+
+        text_box = ctk.CTkTextbox(
+            win,
+            font=FONT_CODE,
+            fg_color="#0d1117",
+            text_color=COLOR_TEXT,
+            wrap="none",
+        )
+        text_box.pack(fill="both", expand=True, padx=16, pady=8)
+        text_box.insert("1.0", full_text)
+        text_box.configure(state="disabled")
+
+        # Botones
+        btn_frame = ctk.CTkFrame(win, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=16, pady=(0, 16))
+
+        ctk.CTkButton(
+            btn_frame,
+            text="💾 Guardar como .txt en Escritorio",
+            font=FONT_BODY,
+            fg_color=COLOR_ACCENT2,
+            hover_color="#2563eb",
+            text_color=COLOR_TEXT,
+            height=36,
+            command=lambda: self._save_diag_report(full_text),
+        ).pack(side="left", padx=4)
+
+        ctk.CTkButton(
+            btn_frame,
+            text="✕ Cerrar",
+            font=FONT_BODY,
+            fg_color="#374151",
+            hover_color="#4b5563",
+            text_color=COLOR_TEXT,
+            height=36,
+            command=win.destroy,
+        ).pack(side="right", padx=4)
+
+    def _save_diag_report(self, content: str) -> None:
+        """Guarda el reporte de diagnóstico como archivo .txt."""
+        import tkinter.filedialog as fd
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"WinOptimizer_Diagnostico_{timestamp}.txt"
+        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+        filepath = fd.asksaveasfilename(
+            initialdir=desktop,
+            initialfile=default_name,
+            defaultextension=".txt",
+            filetypes=[("Archivo de texto", "*.txt"), ("Todos los archivos", "*.*")],
+            title="Guardar reporte de diagnóstico",
+        )
+        if filepath:
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(content)
+            messagebox.showinfo(
+                "Reporte guardado",
+                f"✅ Reporte guardado correctamente en:\n{filepath}",
+            )
 
     # ─── SECCIÓN ASISTENTE IA ────────────────────────────────────────────────
 
