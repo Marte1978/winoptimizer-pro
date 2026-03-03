@@ -1900,19 +1900,36 @@ class WinOptimizerApp(ctk.CTk):
             text_color=COLOR_TEXT,
         ).grid(row=0, column=0, sticky="w")
 
+        btn_row = ctk.CTkFrame(res_header, fg_color="transparent")
+        btn_row.grid(row=0, column=1, sticky="e")
+
+        self._diag_fix_btn = ctk.CTkButton(
+            btn_row,
+            text="🔧 Corregir Problemas",
+            font=FONT_SMALL,
+            fg_color="#7c3aed",
+            hover_color="#6d28d9",
+            text_color=COLOR_TEXT,
+            height=30,
+            width=175,
+            state="disabled",
+            command=self._show_diag_fix_dialog,
+        )
+        self._diag_fix_btn.pack(side="left", padx=(0, 6))
+
         self._diag_report_btn = ctk.CTkButton(
-            res_header,
-            text="📄 Ver Reporte Completo",
+            btn_row,
+            text="📄 Ver Reporte",
             font=FONT_SMALL,
             fg_color=COLOR_ACCENT2,
             hover_color="#2563eb",
             text_color=COLOR_TEXT,
             height=30,
-            width=190,
+            width=140,
             state="disabled",
             command=self._show_diag_report_window,
         )
-        self._diag_report_btn.grid(row=0, column=1, sticky="e")
+        self._diag_report_btn.pack(side="left")
 
         self._diag_result_text = ctk.CTkTextbox(
             results_card,
@@ -1942,6 +1959,7 @@ class WinOptimizerApp(ctk.CTk):
             state="disabled", text="⏳  Ejecutando diagnóstico..."
         ))
         self.after(0, lambda: self._diag_report_btn.configure(state="disabled"))
+        self.after(0, lambda: self._diag_fix_btn.configure(state="disabled"))
         self.after(0, self._diag_clear_results)
 
         for task_id, _ in self._diag_tasks:
@@ -2006,6 +2024,7 @@ class WinOptimizerApp(ctk.CTk):
             state="normal", text="▶  Ejecutar Diagnóstico Completo"
         ))
         self.after(0, lambda: self._diag_report_btn.configure(state="normal"))
+        self.after(0, lambda: self._diag_fix_btn.configure(state="normal"))
 
     def _diag_set_status(self, task_id: str, status: str) -> None:
         lbl = self._diag_status_labels.get(task_id)
@@ -2039,6 +2058,312 @@ class WinOptimizerApp(ctk.CTk):
         self._diag_result_text.insert("end", text)
         self._diag_result_text.see("end")
         self._diag_result_text.configure(state="disabled")
+
+    def _show_diag_fix_dialog(self) -> None:
+        """Muestra diálogo de consentimiento con las correcciones disponibles."""
+        win = ctk.CTkToplevel(self)
+        win.title("🔧 Corregir Problemas Detectados — WinOptimizer Pro")
+        win.geometry("700x680")
+        win.configure(fg_color=COLOR_BG)
+        win.grab_set()
+        win.update_idletasks()
+        x = (win.winfo_screenwidth() - 700) // 2
+        y = (win.winfo_screenheight() - 680) // 2
+        win.geometry(f"+{x}+{y}")
+
+        # Header
+        header = ctk.CTkFrame(win, fg_color="#111827", height=64, corner_radius=0)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        ctk.CTkLabel(
+            header,
+            text="🔧 Corregir Problemas Detectados",
+            font=FONT_HEADING,
+            text_color="#7c3aed",
+        ).pack(side="left", padx=24, pady=16)
+
+        # Advertencia
+        warn = ctk.CTkFrame(win, fg_color="#1c1400", corner_radius=0)
+        warn.pack(fill="x")
+        ctk.CTkLabel(
+            warn,
+            text="⚠️  Revisa cada corrección antes de confirmar. Algunas requieren reiniciar el equipo.",
+            font=FONT_SMALL,
+            text_color=COLOR_WARNING,
+        ).pack(anchor="w", padx=20, pady=8)
+
+        # Definición de correcciones disponibles
+        FIX_ITEMS = [
+            (
+                "fix1",
+                "Reiniciar servicios críticos detenidos",
+                "Arranca todos los servicios en modo Automático que no estén corriendo.\n"
+                "Impacto: Mejora estabilidad. No afecta servicios deshabilitados intencionalmente.",
+                r"$svcs = Get-Service | Where-Object {$_.StartType -eq 'Automatic' -and $_.Status -ne 'Running'}; "
+                r"$count = 0; foreach ($s in $svcs) { try { Start-Service $s.Name -ErrorAction SilentlyContinue; $count++ } catch {} }; "
+                r"Write-Host ('Servicios reiniciados: ' + $count)",
+            ),
+            (
+                "fix2",
+                "Limpiar logs de errores del Event Viewer",
+                "Vacía los registros de eventos System y Application.\n"
+                "Impacto: Libera espacio en disco. Los errores históricos se borran.",
+                r"foreach ($log in @('System','Application')) { try { wevtutil cl $log; Write-Host ('Log ' + $log + ' limpiado.') } catch { Write-Host ('No se pudo limpiar ' + $log) } }",
+            ),
+            (
+                "fix3",
+                "Habilitar TRIM y optimizar discos",
+                "Activa TRIM para SSDs y ejecuta optimización de volúmenes.\n"
+                "Impacto: Mejora velocidad y vida útil de SSDs.",
+                r"fsutil behavior set DisableDeleteNotify 0; "
+                r"Write-Host 'TRIM habilitado.'; "
+                r"Get-Volume | Where-Object {$_.DriveType -eq 'Fixed' -and $_.DriveLetter} | ForEach-Object { try { Optimize-Volume -DriveLetter $_.DriveLetter -ReTrim -ErrorAction SilentlyContinue; Write-Host ('Disco ' + $_.DriveLetter + ': optimizado.') } catch {} }",
+            ),
+            (
+                "fix4",
+                "Limpiar archivos temporales del sistema",
+                "Elimina archivos en %TEMP% y C:\\Windows\\Temp.\n"
+                "Impacto: Libera espacio en disco. Acción segura e irreversible.",
+                r"$paths = @($env:TEMP, 'C:\Windows\Temp'); $total = 0; "
+                r"foreach ($p in $paths) { $c = (Get-ChildItem -Path $p -ErrorAction SilentlyContinue).Count; Remove-Item -Path ($p + '\*') -Recurse -Force -ErrorAction SilentlyContinue; $total += $c }; "
+                r"Write-Host ('Archivos eliminados: ' + $total)",
+            ),
+            (
+                "fix5",
+                "Vaciar caché DNS",
+                "Limpia la caché DNS del sistema.\n"
+                "Impacto: Resuelve fallos de resolución de nombres. Totalmente seguro.",
+                r"ipconfig /flushdns",
+            ),
+            (
+                "fix6",
+                "Buscar actualizaciones de drivers (Windows Update)",
+                "Abre Windows Update para buscar actualizaciones de drivers disponibles.\n"
+                "Impacto: Mejora compatibilidad y estabilidad. Requiere acción manual.",
+                r"Start-Process 'ms-settings:windowsupdate-action'; Write-Host 'Windows Update abierto.'",
+            ),
+        ]
+
+        # Scrollable área de fixes
+        scroll = ctk.CTkScrollableFrame(
+            win,
+            fg_color=COLOR_BG,
+            scrollbar_button_color="#4a5568",
+            scrollbar_button_hover_color="#7c3aed",
+            corner_radius=0,
+        )
+        scroll.pack(fill="both", expand=True, padx=0, pady=0)
+        scroll.grid_columnconfigure(0, weight=1)
+
+        fix_vars: dict[str, ctk.BooleanVar] = {}
+        fix_checks: dict[str, ctk.CTkCheckBox] = {}
+
+        for i, (fix_id, title, desc, _cmd) in enumerate(FIX_ITEMS):
+            var = ctk.BooleanVar(value=True)
+            fix_vars[fix_id] = var
+
+            card = ctk.CTkFrame(scroll, fg_color=COLOR_CARD, corner_radius=8)
+            card.grid(row=i, column=0, padx=16, pady=6, sticky="ew")
+            card.grid_columnconfigure(1, weight=1)
+
+            cb = ctk.CTkCheckBox(
+                card,
+                text="",
+                variable=var,
+                checkbox_width=20,
+                checkbox_height=20,
+                checkmark_color="#000000",
+                fg_color="#7c3aed",
+                hover_color="#6d28d9",
+                border_color=COLOR_BORDER,
+            )
+            cb.grid(row=0, column=0, rowspan=2, padx=(14, 6), pady=12, sticky="n")
+            fix_checks[fix_id] = cb
+
+            ctk.CTkLabel(
+                card,
+                text=title,
+                font=("Segoe UI", 12, "bold"),
+                text_color=COLOR_TEXT,
+                anchor="w",
+            ).grid(row=0, column=1, padx=4, pady=(10, 2), sticky="ew")
+
+            ctk.CTkLabel(
+                card,
+                text=desc,
+                font=FONT_SMALL,
+                text_color=COLOR_MUTED,
+                anchor="w",
+                justify="left",
+                wraplength=520,
+            ).grid(row=1, column=1, padx=4, pady=(0, 10), sticky="ew")
+
+        # Barra inferior de botones
+        btn_bar = ctk.CTkFrame(win, fg_color="#111827", height=64, corner_radius=0)
+        btn_bar.pack(fill="x", side="bottom")
+        btn_bar.pack_propagate(False)
+
+        def select_all():
+            for v in fix_vars.values():
+                v.set(True)
+
+        def deselect_all():
+            for v in fix_vars.values():
+                v.set(False)
+
+        ctk.CTkButton(
+            btn_bar,
+            text="Seleccionar todo",
+            font=FONT_SMALL,
+            fg_color="#374151",
+            hover_color="#4b5563",
+            text_color=COLOR_TEXT,
+            height=36,
+            width=130,
+            command=select_all,
+        ).pack(side="left", padx=(16, 4), pady=14)
+
+        ctk.CTkButton(
+            btn_bar,
+            text="Deseleccionar todo",
+            font=FONT_SMALL,
+            fg_color="#374151",
+            hover_color="#4b5563",
+            text_color=COLOR_TEXT,
+            height=36,
+            width=140,
+            command=deselect_all,
+        ).pack(side="left", padx=4, pady=14)
+
+        ctk.CTkButton(
+            btn_bar,
+            text="✕ Cancelar",
+            font=FONT_BODY,
+            fg_color="#374151",
+            hover_color="#4b5563",
+            text_color=COLOR_TEXT,
+            height=36,
+            width=110,
+            command=win.destroy,
+        ).pack(side="right", padx=16, pady=14)
+
+        def confirm():
+            selected = [(fix_id, title, cmd) for fix_id, title, _desc, cmd in FIX_ITEMS if fix_vars[fix_id].get()]
+            if not selected:
+                messagebox.showwarning("Sin selección", "Selecciona al menos una corrección para aplicar.")
+                return
+            win.destroy()
+            self._apply_diag_fixes_thread(selected)
+
+        ctk.CTkButton(
+            btn_bar,
+            text="✅ Confirmar y Aplicar",
+            font=("Segoe UI", 12, "bold"),
+            fg_color="#7c3aed",
+            hover_color="#6d28d9",
+            text_color=COLOR_TEXT,
+            height=36,
+            width=175,
+            command=confirm,
+        ).pack(side="right", padx=(4, 8), pady=14)
+
+    def _apply_diag_fixes_thread(self, selected: list[tuple[str, str, str]]) -> None:
+        threading.Thread(target=self._apply_diag_fixes_task, args=(selected,), daemon=True).start()
+
+    def _apply_diag_fixes_task(self, selected: list[tuple[str, str, str]]) -> None:
+        from optimizer.core import PowerShellRunner
+
+        # Ventana de progreso
+        prog_win = ctk.CTkToplevel(self)
+        prog_win.title("Aplicando correcciones…")
+        prog_win.geometry("560x520")
+        prog_win.configure(fg_color=COLOR_BG)
+        prog_win.grab_set()
+        prog_win.update_idletasks()
+        x = (prog_win.winfo_screenwidth() - 560) // 2
+        y = (prog_win.winfo_screenheight() - 520) // 2
+        prog_win.geometry(f"+{x}+{y}")
+
+        ctk.CTkLabel(
+            prog_win,
+            text="🔧 Aplicando correcciones…",
+            font=FONT_HEADING,
+            text_color="#7c3aed",
+        ).pack(anchor="w", padx=24, pady=(20, 8))
+
+        # Filas de progreso por fix
+        rows_frame = ctk.CTkFrame(prog_win, fg_color=COLOR_CARD, corner_radius=8)
+        rows_frame.pack(fill="x", padx=16, pady=(0, 8))
+
+        status_labels: dict[str, ctk.CTkLabel] = {}
+        for fix_id, title, _cmd in selected:
+            row = ctk.CTkFrame(rows_frame, fg_color="transparent")
+            row.pack(fill="x", padx=12, pady=4)
+            icon_lbl = ctk.CTkLabel(row, text="◻", font=("Segoe UI", 13), text_color=COLOR_MUTED, width=24)
+            icon_lbl.pack(side="left")
+            ctk.CTkLabel(row, text=title, font=FONT_BODY, text_color=COLOR_TEXT, anchor="w").pack(side="left", padx=6)
+            status_labels[fix_id] = icon_lbl
+
+        # Log de salida
+        log_box = ctk.CTkTextbox(
+            prog_win,
+            font=FONT_CODE,
+            fg_color="#0d1117",
+            text_color=COLOR_TEXT,
+            height=200,
+            wrap="word",
+        )
+        log_box.pack(fill="x", padx=16, pady=(0, 8))
+        log_box.configure(state="disabled")
+
+        def log(text: str) -> None:
+            log_box.configure(state="normal")
+            log_box.insert("end", text + "\n")
+            log_box.see("end")
+            log_box.configure(state="disabled")
+
+        def set_icon(fix_id: str, icon: str, color: str) -> None:
+            lbl = status_labels.get(fix_id)
+            if lbl:
+                lbl.configure(text=icon, text_color=color)
+
+        ps = PowerShellRunner()
+        ok_count = 0
+        fail_count = 0
+
+        for fix_id, title, cmd in selected:
+            self.after(0, lambda fid=fix_id: set_icon(fid, "◼", COLOR_WARNING))
+            self.after(0, lambda t=title: log(f"\n▶  {t}"))
+            ok, out, err = ps.run(cmd, timeout=90)
+            if ok and out.strip():
+                self.after(0, lambda o=out: log(o))
+            if err.strip():
+                self.after(0, lambda e=err: log(f"   ⚠ {e}"))
+            if ok:
+                ok_count += 1
+                self.after(0, lambda fid=fix_id: set_icon(fid, "✔", COLOR_SUCCESS))
+            else:
+                fail_count += 1
+                self.after(0, lambda fid=fix_id: set_icon(fid, "✗", COLOR_DANGER))
+
+        # Resumen final
+        summary = f"\n{'─'*40}\n✅ Éxitos: {ok_count}   ❌ Fallos: {fail_count}"
+        self.after(0, lambda: log(summary))
+
+        # Botón cerrar
+        def add_close():
+            ctk.CTkButton(
+                prog_win,
+                text="✕ Cerrar",
+                font=FONT_BODY,
+                fg_color="#374151",
+                hover_color="#4b5563",
+                text_color=COLOR_TEXT,
+                height=36,
+                command=prog_win.destroy,
+            ).pack(pady=(4, 16))
+
+        self.after(0, add_close)
 
     def _show_diag_report_window(self) -> None:
         """Abre ventana de reporte completo en el escritorio."""
