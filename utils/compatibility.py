@@ -3,8 +3,11 @@ Módulo de compatibilidad: verifica versión de Windows y capacidades del sistem
 """
 import platform
 import subprocess
+import sys
 import winreg
 from typing import Optional
+
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
 def get_windows_version() -> dict:
@@ -55,6 +58,7 @@ def check_nvme_support() -> bool:
             capture_output=True,
             text=True,
             timeout=10,
+            creationflags=_NO_WINDOW,
         )
         return "NVMe" in result.stdout or "NVME" in result.stdout.upper()
     except Exception:
@@ -69,6 +73,7 @@ def get_ram_gb() -> float:
             capture_output=True,
             text=True,
             timeout=10,
+            creationflags=_NO_WINDOW,
         )
         lines = [l.strip() for l in result.stdout.splitlines() if l.strip().isdigit()]
         if lines:
@@ -86,6 +91,7 @@ def check_ssd_present() -> bool:
             capture_output=True,
             text=True,
             timeout=10,
+            creationflags=_NO_WINDOW,
         )
         return "Solid" in result.stdout or "SSD" in result.stdout.upper()
     except Exception:

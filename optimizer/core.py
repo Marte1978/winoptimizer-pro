@@ -5,7 +5,11 @@ Provee funciones base para ejecutar comandos PowerShell y modificar el registro.
 import subprocess
 import winreg
 import logging
+import sys
 from typing import Optional, Union
+
+# Suprimir ventanas de consola al llamar subprocesos desde un exe sin consola
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 logger = logging.getLogger("WinOptimizer")
 
@@ -33,6 +37,7 @@ class PowerShellRunner:
                 timeout=timeout,
                 encoding="utf-8",
                 errors="replace",
+                creationflags=_NO_WINDOW,
             )
             success = result.returncode == 0
             if not success:
