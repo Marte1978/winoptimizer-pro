@@ -168,6 +168,65 @@ class NetworkOptimizer:
         except Exception:
             return False
 
+    def optimize_dns_for_speed(self) -> bool:
+        """Cambia el DNS de los adaptadores activos a Cloudflare (1.1.1.1) para mayor velocidad."""
+        self.progress_cb("Configurando DNS Cloudflare 1.1.1.1...", 20)
+
+        script = (
+            "$adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }; "
+            "$count = 0; "
+            "foreach ($a in $adapters) { "
+            "  try { Set-DnsClientServerAddress -InterfaceIndex $a.InterfaceIndex "
+            "    -ServerAddresses ('1.1.1.1','1.0.0.1') -ErrorAction Stop; $count++ "
+            "  } catch {} "
+            "}; "
+            "Write-Output \"OK:$count\""
+        )
+        ok, out, _ = self.ps.run(script)
+
+        if ok and "OK:" in out:
+            count = out.strip().split("OK:")[-1].strip()
+            logger.info(f"DNS Cloudflare configurado en {count} adaptador(es).")
+            if self.tracker:
+                self.tracker.record(
+                    category="network",
+                    action="dns_cloudflare",
+                    description=f"DNS cambiado a Cloudflare 1.1.1.1/1.0.0.1 ({count} adaptadores)",
+                    revert_command=(
+                        "Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | "
+                        "ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.InterfaceIndex "
+                        "-ResetServerAddresses -ErrorAction SilentlyContinue }"
+                    ),
+                )
+            return True
+        return False
+
+    def boost_dns_cache(self) -> bool:
+        """Aumenta el tamaño y tiempo de vida del caché DNS de Windows."""
+        self.progress_cb("Ampliando caché DNS de Windows...", 40)
+
+        base_path = r"SYSTEM\CurrentControlSet\Services\Dnscache\Parameters"
+        results = []
+        for name, value in [
+            ("CacheHashTableBucketSize", 1),
+            ("CacheHashTableSize", 384),
+            ("MaxCacheEntryTtlLimit", 64000),
+            ("MaxSOACacheEntryTtlLimit", 301),
+        ]:
+            ok, _ = self.editor.set_value("HKLM", base_path, name, value, winreg.REG_DWORD)
+            results.append(ok)
+
+        if any(results):
+            logger.info("Caché DNS de Windows optimizado.")
+            if self.tracker:
+                self.tracker.record(
+                    category="network",
+                    action="boost_dns_cache",
+                    description="Caché DNS ampliado para resolución más rápida",
+                )
+            return True
+        return False
+
     def optimize_all(self) -> tuple[int, int]:
         """Aplica todas las optimizaciones de red."""
         ok_count = 0
@@ -178,6 +237,8 @@ class NetworkOptimizer:
             (self.optimize_tcp_settings, "Optimizar TCP"),
             (self.disable_network_throttling, "Deshabilitar Network Throttling"),
             (self.flush_dns, "Limpiar DNS"),
+            (self.optimize_dns_for_speed, "DNS Cloudflare"),
+            (self.boost_dns_cache, "Boost caché DNS"),
         ]
 
         for func, name in optimizations:

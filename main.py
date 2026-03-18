@@ -70,8 +70,10 @@ FONT_BODY = ("Segoe UI", 11)
 FONT_SMALL = ("Segoe UI", 9)
 FONT_CODE = ("Consolas", 10)
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "8.0.0"
 APP_NAME = "WinOptimizer Pro"
+APP_AUTHOR = "Willy Tirado"
+APP_BUILD = "Hecho con Claude"
 
 
 class WinOptimizerApp(ctk.CTk):
@@ -93,6 +95,7 @@ class WinOptimizerApp(ctk.CTk):
         self._checkboxes: dict[str, ctk.CTkCheckBox] = {}
         self._section_frames: dict[str, ctk.CTkFrame] = {}
         self._nav_buttons: dict[str, ctk.CTkButton] = {}
+        self._silent_mode: bool = False  # Modo silencioso: sin popups bloqueantes
 
         # SaaS connection
         self._saas_token: Optional[str] = None
@@ -210,6 +213,18 @@ class WinOptimizerApp(ctk.CTk):
             font=FONT_SMALL,
             text_color=COLOR_MUTED,
         ).pack(anchor="w")
+        ctk.CTkLabel(
+            logo_frame,
+            text=f"© {APP_AUTHOR}",
+            font=("Segoe UI", 8),
+            text_color="#4a5568",
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            logo_frame,
+            text=APP_BUILD,
+            font=("Segoe UI", 8, "italic"),
+            text_color="#3a4a5a",
+        ).pack(anchor="w")
 
         # Sistema info rápida
         win_ver = self.system_info.get("product_name", "Windows")
@@ -256,6 +271,7 @@ class WinOptimizerApp(ctk.CTk):
             ("power", "⚡  Energía", "Plan de energía y CPU"),
             ("cleanup", "🧹  Limpieza", "Archivos temporales y caché"),
             ("network", "🌐  Red", "Optimización de red y TCP"),
+            ("browser", "🖥  Navegador", "Optimizar Chrome/Edge/Firefox RAM"),
             ("visual", "👁  Visual", "Efectos visuales"),
             ("log", "📋  Historial", "Historial de cambios"),
             ("ai", "🤖  Asistente IA", "Recomendaciones con inteligencia artificial"),
@@ -325,7 +341,20 @@ class WinOptimizerApp(ctk.CTk):
             text_color=COLOR_TEXT,
             height=36,
             command=self._revert_changes_thread,
-        ).grid(row=2, column=0, padx=4, pady=(3, 16), sticky="ew")
+        ).grid(row=2, column=0, padx=4, pady=(3, 8), sticky="ew")
+
+        # Botón Modo Silencioso
+        self._silent_btn = ctk.CTkButton(
+            action_frame,
+            text="🔕  Modo Silencioso: OFF",
+            font=("Segoe UI", 9),
+            fg_color="#1e293b",
+            hover_color="#334155",
+            text_color=COLOR_MUTED,
+            height=28,
+            command=self._toggle_silent_mode,
+        )
+        self._silent_btn.grid(row=3, column=0, padx=4, pady=(0, 16), sticky="ew")
 
     # ─── ÁREA PRINCIPAL ───────────────────────────────────────────────────────
 
@@ -368,6 +397,7 @@ class WinOptimizerApp(ctk.CTk):
         self._build_power_section()
         self._build_cleanup_section()
         self._build_network_section()
+        self._build_browser_section()
         self._build_visual_section()
         self._build_log_section()
         self._build_ai_section()
@@ -389,14 +419,21 @@ class WinOptimizerApp(ctk.CTk):
             text_color=COLOR_MUTED,
         ).grid(row=0, column=0, padx=16, pady=10, sticky="w")
 
+        ctk.CTkLabel(
+            status_bar,
+            text=f"© {APP_AUTHOR} · {APP_BUILD}",
+            font=("Segoe UI", 8),
+            text_color="#2d3748",
+        ).grid(row=0, column=2, padx=8, sticky="e")
+
         self._progress_bar = ctk.CTkProgressBar(
             status_bar,
             variable=self._progress_var,
             progress_color=COLOR_ACCENT,
             fg_color=COLOR_BORDER,
-            width=300,
+            width=260,
         )
-        self._progress_bar.grid(row=0, column=1, padx=16, sticky="e")
+        self._progress_bar.grid(row=0, column=3, padx=16, sticky="e")
         self._progress_bar.set(0)
 
     # ─── SECCIONES ────────────────────────────────────────────────────────────
@@ -535,7 +572,8 @@ class WinOptimizerApp(ctk.CTk):
             ("🔧  Registro", f"{len(REGISTRY_TWEAKS)} tweaks de rendimiento y gaming"),
             ("⚡  Energía", "Plan Ultimate Performance + configuración CPU"),
             ("🧹  Limpieza", "Temporales, caché Windows Update, WinSxS"),
-            ("🌐  Red", "Algoritmo de Nagle, TCP, Network Throttling"),
+            ("🌐  Red", "Nagle, TCP, Network Throttling + DNS Cloudflare"),
+            ("🖥   Navegador", "Edge/Chrome Efficiency Mode, caché, segundo plano"),
             ("👁   Visual", "Animaciones, transparencia, efectos visuales"),
         ]
 
@@ -924,6 +962,10 @@ class WinOptimizerApp(ctk.CTk):
              "Elimina la limitación de ancho de banda que Windows impone a apps multimedia.", True),
             ("net_dns", "🔄  Limpiar caché DNS",
              "Limpia la caché DNS del sistema para resolver IPs actualizadas.", True),
+            ("net_dns_speed", "⚡  DNS Cloudflare 1.1.1.1 (más rápido)",
+             "Cambia el DNS de tu adaptador al servidor de Cloudflare. Hasta 3× más rápido que el DNS del proveedor de internet.", True),
+            ("net_dns_cache", "🗄  Ampliar caché DNS de Windows",
+             "Aumenta el tamaño y tiempo de vida del caché DNS local. El sistema recordará más sitios sin consultar el servidor.", True),
         ]
 
         ctk.CTkLabel(
@@ -942,6 +984,86 @@ class WinOptimizerApp(ctk.CTk):
                 opt_frame, text="", variable=cb_var,
                 checkbox_width=20, checkbox_height=20,
                 checkmark_color="#000000", fg_color=COLOR_ACCENT,
+                border_color=COLOR_BORDER,
+            )
+            cb.grid(row=0, column=0, padx=16, pady=14)
+            self._checkboxes[key] = cb
+
+            ctk.CTkLabel(
+                opt_frame, text=title, font=("Segoe UI", 12, "bold"), text_color=COLOR_TEXT
+            ).grid(row=0, column=1, padx=8, pady=(12, 4), sticky="w")
+            ctk.CTkLabel(
+                opt_frame, text=desc, font=FONT_BODY, text_color=COLOR_MUTED, wraplength=600
+            ).grid(row=1, column=1, padx=8, pady=(0, 12), sticky="w")
+
+    def _build_browser_section(self) -> None:
+        """Sección de optimización de navegadores web (RAM, velocidad, pestañas)."""
+        frame = self._make_section_frame("browser")
+
+        ctk.CTkLabel(
+            frame,
+            text=(
+                "Cuando tienes muchas pestañas abiertas, los navegadores consumen toda la RAM. "
+                "Estas optimizaciones activan el modo ahorro de memoria y limpian la caché para liberar recursos."
+            ),
+            font=FONT_BODY,
+            text_color=COLOR_MUTED,
+            wraplength=700,
+        ).grid(row=0, column=0, padx=20, pady=(16, 8), sticky="w")
+
+        options = [
+            (
+                "bro_edge_efficiency",
+                "🔵  Edge — Modo Eficiencia + Desactivar Startup Boost",
+                (
+                    "Activa el Efficiency Mode de Edge: las pestañas inactivas duermen y usan menos RAM. "
+                    "Desactiva el arranque en segundo plano al encender el PC."
+                ),
+                True,
+            ),
+            (
+                "bro_edge_bg",
+                "🔵  Edge — Deshabilitar modo en segundo plano",
+                (
+                    "Impide que Edge siga corriendo aunque lo cierres. "
+                    "Libera RAM y CPU cuando no usas el navegador."
+                ),
+                True,
+            ),
+            (
+                "bro_chrome_efficiency",
+                "🟡  Chrome — Modo Alta Eficiencia de Memoria",
+                (
+                    "Activa 'High Efficiency Mode' en Chrome: descarga pestañas inactivas de la RAM. "
+                    "También desactiva el Startup Boost de Chrome."
+                ),
+                True,
+            ),
+            (
+                "bro_clear_cache",
+                "🧹  Limpiar caché de Chrome / Edge / Firefox",
+                (
+                    "Elimina archivos temporales y caché de los tres navegadores. "
+                    "Libera espacio en disco y mejora la velocidad de carga en sitios que tienen caché corrupta."
+                ),
+                False,
+            ),
+        ]
+
+        for row_i, (key, title, desc, default) in enumerate(options):
+            opt_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+            opt_frame.grid(row=row_i + 1, column=0, padx=20, pady=6, sticky="ew")
+            opt_frame.grid_columnconfigure(1, weight=1)
+
+            cb_var = ctk.BooleanVar(value=default)
+            cb = ctk.CTkCheckBox(
+                opt_frame,
+                text="",
+                variable=cb_var,
+                checkbox_width=20,
+                checkbox_height=20,
+                checkmark_color="#000000",
+                fg_color=COLOR_ACCENT,
                 border_color=COLOR_BORDER,
             )
             cb.grid(row=0, column=0, padx=16, pady=14)
@@ -1475,6 +1597,7 @@ class WinOptimizerApp(ctk.CTk):
             "power": "⚡  Plan de Energía",
             "cleanup": "🧹  Limpieza del Sistema",
             "network": "🌐  Optimización de Red",
+            "browser": "🖥  Optimización de Navegadores",
             "visual": "👁  Efectos Visuales",
             "log": "📋  Historial de Cambios",
             "ai": "🤖  Asistente IA",
@@ -1506,6 +1629,40 @@ class WinOptimizerApp(ctk.CTk):
             return cb.get() == 1
         return False
 
+    def _toggle_silent_mode(self) -> None:
+        """Activa/desactiva el modo silencioso (sin popups bloqueantes)."""
+        self._silent_mode = not self._silent_mode
+        if self._silent_mode:
+            self._silent_btn.configure(
+                text="🔔  Modo Silencioso: ON",
+                fg_color="#0d3320",
+                text_color=COLOR_SUCCESS,
+            )
+        else:
+            self._silent_btn.configure(
+                text="🔕  Modo Silencioso: OFF",
+                fg_color="#1e293b",
+                text_color=COLOR_MUTED,
+            )
+
+    def _notify(self, title: str, message: str, level: str = "info") -> None:
+        """Muestra notificación: popup si modo normal, barra de estado si modo silencioso."""
+        if self._silent_mode:
+            color = COLOR_SUCCESS if level == "info" else (
+                COLOR_WARNING if level == "warning" else COLOR_DANGER
+            )
+            icon = "✅" if level == "info" else ("⚠️" if level == "warning" else "❌")
+            self._update_progress(f"{icon} {message}", 100 if level == "info" else 0)
+            # Auto-limpiar el mensaje después de 6 segundos
+            self.after(6000, lambda: self._update_progress("Listo", 0))
+        else:
+            if level == "info":
+                messagebox.showinfo(title, message)
+            elif level == "warning":
+                messagebox.showwarning(title, message)
+            else:
+                messagebox.showerror(title, message)
+
     def _update_progress(self, message: str, percentage: int) -> None:
         """Actualiza la barra de progreso y el mensaje de estado (thread-safe)."""
         def _update():
@@ -1536,17 +1693,16 @@ class WinOptimizerApp(ctk.CTk):
 
         if ok:
             self._backup_created = True
-            self.after(0, lambda: messagebox.showinfo(
+            self.after(0, lambda: self._notify(
                 "Backup creado",
-                "✅ Punto de restauración del sistema creado exitosamente.\n\n"
-                "Ya puedes aplicar las optimizaciones de forma segura.",
+                "Punto de restauración creado. Ya puedes aplicar las optimizaciones.",
+                "info",
             ))
         else:
-            self.after(0, lambda: messagebox.showwarning(
+            self.after(0, lambda: self._notify(
                 "Advertencia",
-                "⚠️ No se pudo crear el punto de restauración.\n"
-                "Esto puede deberse a que ya existe uno reciente (< 24h).\n\n"
-                "Puedes continuar, pero se recomienda proceder con precaución.",
+                "No se pudo crear el punto de restauración (puede existir uno reciente). Puedes continuar con precaución.",
+                "warning",
             ))
 
         self._update_progress("Backup completado.", 100)
@@ -1682,8 +1838,98 @@ class WinOptimizerApp(ctk.CTk):
                 ok = self.net_opt.flush_dns()
                 total_ok += 1 if ok else 0
 
-            # 6. Visual
-            self._update_progress("Optimizando efectos visuales...", 90)
+            if self._is_checked("net_dns_speed"):
+                ok = self.net_opt.optimize_dns_for_speed()
+                total_ok += 1 if ok else 0
+
+            if self._is_checked("net_dns_cache"):
+                ok = self.net_opt.boost_dns_cache()
+                total_ok += 1 if ok else 0
+
+            # 6. Navegador
+            self._update_progress("Optimizando navegadores...", 86)
+            from optimizer.core import PowerShellRunner as _PSR
+            _ps = _PSR()
+
+            if self._is_checked("bro_edge_efficiency"):
+                _script = (
+                    "$p='HKCU:\\SOFTWARE\\Policies\\Microsoft\\Edge';"
+                    "if(!(Test-Path $p)){New-Item -Path $p -Force|Out-Null};"
+                    "Set-ItemProperty -Path $p -Name 'EfficiencyMode' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue;"
+                    "Set-ItemProperty -Path $p -Name 'StartupBoostEnabled' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue;"
+                    "Write-Output 'OK'"
+                )
+                ok2, out2, _ = _ps.run(_script)
+                total_ok += 1 if (ok2 and "OK" in out2) else 0
+                if self.tracker and ok2 and "OK" in out2:
+                    self.tracker.record(
+                        category="browser",
+                        action="edge_efficiency",
+                        description="Edge Efficiency Mode activado + Startup Boost desactivado",
+                        revert_command=(
+                            "$p='HKCU:\\SOFTWARE\\Policies\\Microsoft\\Edge';"
+                            "Remove-ItemProperty -Path $p -Name 'EfficiencyMode','StartupBoostEnabled' -ErrorAction SilentlyContinue"
+                        ),
+                    )
+
+            if self._is_checked("bro_edge_bg"):
+                _script = (
+                    "$p='HKCU:\\SOFTWARE\\Policies\\Microsoft\\Edge';"
+                    "if(!(Test-Path $p)){New-Item -Path $p -Force|Out-Null};"
+                    "Set-ItemProperty -Path $p -Name 'BackgroundModeEnabled' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue;"
+                    "Write-Output 'OK'"
+                )
+                ok2, out2, _ = _ps.run(_script)
+                total_ok += 1 if (ok2 and "OK" in out2) else 0
+                if self.tracker and ok2 and "OK" in out2:
+                    self.tracker.record(
+                        category="browser",
+                        action="edge_bg_disabled",
+                        description="Edge: modo en segundo plano desactivado (libera RAM)",
+                        revert_command=(
+                            "Set-ItemProperty -Path 'HKCU:\\SOFTWARE\\Policies\\Microsoft\\Edge' "
+                            "-Name 'BackgroundModeEnabled' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue"
+                        ),
+                    )
+
+            if self._is_checked("bro_chrome_efficiency"):
+                _script = (
+                    "$p='HKCU:\\SOFTWARE\\Policies\\Google\\Chrome';"
+                    "if(!(Test-Path $p)){New-Item -Path $p -Force|Out-Null};"
+                    "Set-ItemProperty -Path $p -Name 'HighEfficiencyModeEnabled' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue;"
+                    "Set-ItemProperty -Path $p -Name 'StartupBoostEnabled' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue;"
+                    "Write-Output 'OK'"
+                )
+                ok2, out2, _ = _ps.run(_script)
+                total_ok += 1 if (ok2 and "OK" in out2) else 0
+                if self.tracker and ok2 and "OK" in out2:
+                    self.tracker.record(
+                        category="browser",
+                        action="chrome_efficiency",
+                        description="Chrome High Efficiency Mode activado",
+                        revert_command=(
+                            "$p='HKCU:\\SOFTWARE\\Policies\\Google\\Chrome';"
+                            "Remove-ItemProperty -Path $p -Name 'HighEfficiencyModeEnabled','StartupBoostEnabled' -ErrorAction SilentlyContinue"
+                        ),
+                    )
+
+            if self._is_checked("bro_clear_cache"):
+                _script = (
+                    "$dirs=@("
+                    "'$env:LOCALAPPDATA\\Google\\Chrome\\User Data\\Default\\Cache',"
+                    "'$env:LOCALAPPDATA\\Google\\Chrome\\User Data\\Default\\Code Cache',"
+                    "'$env:LOCALAPPDATA\\Microsoft\\Edge\\User Data\\Default\\Cache',"
+                    "'$env:LOCALAPPDATA\\Microsoft\\Edge\\User Data\\Default\\Code Cache',"
+                    "'$env:APPDATA\\Mozilla\\Firefox\\Profiles');"
+                    "$c=0;foreach($d in $dirs){if(Test-Path $d){"
+                    "Get-ChildItem $d -Recurse -ErrorAction SilentlyContinue|Remove-Item -Force -Recurse -ErrorAction SilentlyContinue;"
+                    "$c++}};Write-Output \"OK:$c\""
+                )
+                ok2, out2, _ = _ps.run(_script)
+                total_ok += 1 if ok2 else 0
+
+            # 8. Visual
+            self._update_progress("Optimizando efectos visuales...", 94)
             if self._is_checked("vis_performance"):
                 ok = self.vis_opt.set_performance_mode()
                 total_ok += 1 if ok else 0
@@ -1716,15 +1962,11 @@ class WinOptimizerApp(ctk.CTk):
             self.after(100, self._refresh_activity)
 
         # Mostrar resultado
-        self.after(0, lambda: messagebox.showinfo(
-            "Optimización completada",
-            f"✅ Optimización finalizada\n\n"
-            f"• Exitosas: {total_ok}\n"
-            f"• Con errores: {total_fail}\n\n"
-            f"🔄 Se recomienda REINICIAR el equipo para que todos los cambios "
-            f"tomen efecto completamente.\n\n"
-            f"📋 Ve a la sección 'Registro de Cambios' para ver el detalle.",
-        ))
+        _msg = (
+            f"Optimización finalizada — {total_ok} exitosas, {total_fail} con errores. "
+            f"Reinicia el equipo para aplicar todos los cambios."
+        )
+        self.after(0, lambda: self._notify("Optimización completada", _msg, "info"))
 
     def _revert_changes_thread(self) -> None:
         """Revierte los cambios aplicados."""
@@ -2371,7 +2613,7 @@ class WinOptimizerApp(ctk.CTk):
         win.title("📋 Reporte de Diagnóstico — WinOptimizer Pro")
         win.geometry("960x720")
         win.configure(fg_color=COLOR_BG)
-        win.grab_set()
+        # Sin grab_set: la ventana de reporte es no-modal, no bloquea el trabajo
 
         win.update_idletasks()
         x = (win.winfo_screenwidth() - 960) // 2

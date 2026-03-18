@@ -18,8 +18,8 @@ import shutil
 import argparse
 from pathlib import Path
 
-APP_NAME = "WinOptimizerPro"
-APP_VERSION = "1.0.0"
+APP_NAME = "WinOptimizerPro 8"
+APP_VERSION = "8.0.0"
 MAIN_SCRIPT = "main.py"
 ICON_PATH = "assets/icon.ico"
 DIST_DIR = "dist"
@@ -159,6 +159,10 @@ def build(one_file: bool = True, debug: bool = False) -> None:
         pyinstaller_args.append("--windowed")
         print("[build] Modo: ventana (sin consola)")
 
+    # UAC: solicitar elevación de administrador (embeds manifest)
+    # Esto ayuda a los antivirus a reconocerlo como herramienta legítima de sistema
+    pyinstaller_args.append("--uac-admin")
+
     # Metadata de versión (solo Windows)
     version_file = _create_version_file()
     if version_file and Path(version_file).exists():
@@ -209,13 +213,16 @@ VSVersionInfo(
     StringFileInfo([
       StringTable(
         u'040904B0',
-        [StringStruct(u'CompanyName', u'WinOptimizer Pro'),
-         StringStruct(u'FileDescription', u'WinOptimizer Pro - Optimizador de Windows'),
+        [StringStruct(u'CompanyName', u'Willy Tirado'),
+         StringStruct(u'FileDescription', u'WinOptimizer Pro 8 - Herramienta de optimizacion de Windows para uso personal'),
          StringStruct(u'FileVersion', u'{APP_VERSION}'),
-         StringStruct(u'InternalName', u'{APP_NAME}'),
-         StringStruct(u'OriginalFilename', u'{APP_NAME}.exe'),
-         StringStruct(u'ProductName', u'WinOptimizer Pro'),
-         StringStruct(u'ProductVersion', u'{APP_VERSION}')])
+         StringStruct(u'InternalName', u'WinOptimizerPro8'),
+         StringStruct(u'LegalCopyright', u'Copyright (c) 2026 Willy Tirado. Todos los derechos reservados.'),
+         StringStruct(u'LegalTrademarks', u'WinOptimizer Pro es una herramienta de uso personal.'),
+         StringStruct(u'OriginalFilename', u'WinOptimizerPro 8.exe'),
+         StringStruct(u'ProductName', u'WinOptimizer Pro 8'),
+         StringStruct(u'ProductVersion', u'{APP_VERSION}'),
+         StringStruct(u'Comments', u'Herramienta de optimizacion de rendimiento para Windows 10/11. Uso personal exclusivo.')])
     ]),
     VarFileInfo([VarStruct(u'Translation', [0x0409, 1200])])
   ]
