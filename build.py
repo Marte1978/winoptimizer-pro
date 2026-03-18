@@ -18,8 +18,8 @@ import shutil
 import argparse
 from pathlib import Path
 
-APP_NAME = "WinOptimizerPro 8"
-APP_VERSION = "8.0.0"
+APP_NAME = "WinOptimizerPro 9"
+APP_VERSION = "9.0.0"
 MAIN_SCRIPT = "main.py"
 ICON_PATH = "assets/icon.ico"
 DIST_DIR = "dist"
@@ -214,13 +214,13 @@ VSVersionInfo(
       StringTable(
         u'040904B0',
         [StringStruct(u'CompanyName', u'Willy Tirado'),
-         StringStruct(u'FileDescription', u'WinOptimizer Pro 8 - Herramienta de optimizacion de Windows para uso personal'),
+         StringStruct(u'FileDescription', u'WinOptimizer Pro 9 - Herramienta de optimizacion de Windows para uso personal'),
          StringStruct(u'FileVersion', u'{APP_VERSION}'),
-         StringStruct(u'InternalName', u'WinOptimizerPro8'),
+         StringStruct(u'InternalName', u'WinOptimizerPro9'),
          StringStruct(u'LegalCopyright', u'Copyright (c) 2026 Willy Tirado. Todos los derechos reservados.'),
          StringStruct(u'LegalTrademarks', u'WinOptimizer Pro es una herramienta de uso personal.'),
-         StringStruct(u'OriginalFilename', u'WinOptimizerPro 8.exe'),
-         StringStruct(u'ProductName', u'WinOptimizer Pro 8'),
+         StringStruct(u'OriginalFilename', u'WinOptimizerPro 9.exe'),
+         StringStruct(u'ProductName', u'WinOptimizer Pro 9'),
          StringStruct(u'ProductVersion', u'{APP_VERSION}'),
          StringStruct(u'Comments', u'Herramienta de optimizacion de rendimiento para Windows 10/11. Uso personal exclusivo.')])
     ]),

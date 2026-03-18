@@ -50,6 +50,12 @@ from optimizer.visual import VisualOptimizer
 from optimizer.ai_assistant import AIAssistant
 from optimizer.performance_monitor import PerformanceMonitor, PerformanceSnapshot
 from optimizer.supabase_agent import SupabaseAgent, SessionExpiredError, InsufficientCreditsError
+from optimizer.debloat import DebloatManager, BLOATWARE_APPS
+from optimizer.privacy import PrivacyOptimizer, PRIVACY_TWEAKS
+from optimizer.startup import StartupManager
+from optimizer.temperature import TemperatureMonitor
+from optimizer.autoclean import AutoCleanScheduler
+from optimizer.profiles import ProfilesManager, PROFILES
 
 logger = setup_logger("WinOptimizer")
 
@@ -70,7 +76,7 @@ FONT_BODY = ("Segoe UI", 11)
 FONT_SMALL = ("Segoe UI", 9)
 FONT_CODE = ("Consolas", 10)
 
-APP_VERSION = "8.0.0"
+APP_VERSION = "9.0.0"
 APP_NAME = "WinOptimizer Pro"
 APP_AUTHOR = "Willy Tirado"
 APP_BUILD = "Hecho con Claude"
@@ -120,6 +126,14 @@ class WinOptimizerApp(ctk.CTk):
         self.net_opt = NetworkOptimizer(self.tracker, make_progress)
         self.vis_opt = VisualOptimizer(self.tracker, make_progress)
         self.ai_assistant = AIAssistant()
+        self.debloat_mgr = DebloatManager(self.tracker, make_progress)
+        self.privacy_opt = PrivacyOptimizer(self.tracker, make_progress)
+        self.startup_mgr = StartupManager()
+        self.temp_monitor = TemperatureMonitor(interval=4.0, on_update=self._on_temp_update)
+        self.autoclean_mgr = AutoCleanScheduler(make_progress)
+        self.profiles_mgr = ProfilesManager(self.tracker, make_progress)
+        self._temp_snapshot: dict = {}  # último snapshot de temperatura
+        self._temp_widgets: dict = {}   # widgets del panel de temperatura
 
         # Configurar ventana
         self._setup_window()
@@ -273,6 +287,12 @@ class WinOptimizerApp(ctk.CTk):
             ("network", "🌐  Red", "Optimización de red y TCP"),
             ("browser", "🖥  Navegador", "Optimizar Chrome/Edge/Firefox RAM"),
             ("visual", "👁  Visual", "Efectos visuales"),
+            ("debloat", "🗑  Debloat", "Eliminar apps bloatware preinstaladas"),
+            ("privacy", "🔒  Privacidad", "Telemetría, Recall, Copilot"),
+            ("startup", "🚀  Inicio", "Programas al arranque de Windows"),
+            ("profiles", "⚡  Perfiles", "Gaming / Trabajo / Batería (1 clic)"),
+            ("temperature", "🌡  Temperatura", "Monitor CPU/GPU + throttling"),
+            ("autoclean", "⏱  Auto-Limpieza", "Limpieza semanal/mensual automática"),
             ("log", "📋  Historial", "Historial de cambios"),
             ("ai", "🤖  Asistente IA", "Recomendaciones con inteligencia artificial"),
         ]
@@ -399,6 +419,12 @@ class WinOptimizerApp(ctk.CTk):
         self._build_network_section()
         self._build_browser_section()
         self._build_visual_section()
+        self._build_debloat_section()
+        self._build_privacy_section()
+        self._build_startup_section()
+        self._build_profiles_section()
+        self._build_temperature_section()
+        self._build_autoclean_section()
         self._build_log_section()
         self._build_ai_section()
 
@@ -1076,6 +1102,492 @@ class WinOptimizerApp(ctk.CTk):
                 opt_frame, text=desc, font=FONT_BODY, text_color=COLOR_MUTED, wraplength=600
             ).grid(row=1, column=1, padx=8, pady=(0, 12), sticky="w")
 
+    # ─── CALLBACK TEMPERATURA ────────────────────────────────────────────────
+    def _on_temp_update(self, snapshot: dict) -> None:
+        """Recibe actualizaciones del monitor de temperatura (thread-safe)."""
+        self._temp_snapshot = snapshot
+        self.after(0, self._refresh_temp_widgets)
+
+    def _refresh_temp_widgets(self) -> None:
+        """Actualiza los widgets de temperatura con el último snapshot."""
+        snap = self._temp_snapshot
+        if not snap:
+            return
+        if "cpu_temp_lbl" in self._temp_widgets:
+            cpu = snap.get("cpu_temp")
+            txt = f"{cpu:.1f} °C" if cpu is not None else "N/D"
+            color = COLOR_DANGER if (cpu or 0) > 90 else (COLOR_WARNING if (cpu or 0) > 75 else COLOR_SUCCESS)
+            self._temp_widgets["cpu_temp_lbl"].configure(text=txt, text_color=color)
+        if "gpu_temp_lbl" in self._temp_widgets:
+            gpu = snap.get("gpu_temp")
+            txt = f"{gpu:.1f} °C" if gpu is not None else "N/D"
+            color = COLOR_DANGER if (gpu or 0) > 90 else (COLOR_WARNING if (gpu or 0) > 80 else COLOR_SUCCESS)
+            self._temp_widgets["gpu_temp_lbl"].configure(text=txt, text_color=color)
+        if "throttle_lbl" in self._temp_widgets:
+            throttling = snap.get("is_throttling", False)
+            txt = "⚠️  THROTTLING ACTIVO" if throttling else "✅  Normal"
+            color = COLOR_WARNING if throttling else COLOR_SUCCESS
+            self._temp_widgets["throttle_lbl"].configure(text=txt, text_color=color)
+        if "advice_lbl" in self._temp_widgets:
+            advice = self.temp_monitor.get_thermal_advice(snap)
+            self._temp_widgets["advice_lbl"].configure(text=advice)
+
+    # ─── SECCIÓN DEBLOAT ─────────────────────────────────────────────────────
+    def _build_debloat_section(self) -> None:
+        """Sección para eliminar apps bloatware preinstaladas."""
+        frame = self._make_section_frame("debloat")
+
+        ctk.CTkLabel(
+            frame,
+            text="Elimina apps preinstaladas que consumen RAM y CPU innecesariamente. "
+                 "Pueden reinstalarse desde la Microsoft Store si las necesitas.",
+            font=FONT_BODY, text_color=COLOR_MUTED, wraplength=700,
+        ).grid(row=0, column=0, padx=20, pady=(16, 8), sticky="w")
+
+        categories = {}
+        for app in BLOATWARE_APPS:
+            cat = app.get("category", "misc")
+            categories.setdefault(cat, []).append(app)
+
+        cat_labels = {
+            "xbox": "🎮  Xbox / Gaming",
+            "communication": "💬  Comunicación",
+            "games": "🃏  Juegos",
+            "media": "🎵  Multimedia",
+            "misc": "📦  Otras Apps",
+        }
+
+        row_i = 1
+        for cat, apps in categories.items():
+            ctk.CTkLabel(
+                frame,
+                text=cat_labels.get(cat, cat.title()),
+                font=FONT_HEADING,
+                text_color=COLOR_ACCENT,
+            ).grid(row=row_i, column=0, padx=20, pady=(12, 4), sticky="w")
+            row_i += 1
+
+            for app in apps:
+                key = f"dbl_{app['name']}"
+                opt_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=8)
+                opt_frame.grid(row=row_i, column=0, padx=20, pady=3, sticky="ew")
+                opt_frame.grid_columnconfigure(1, weight=1)
+
+                cb_var = ctk.BooleanVar(value=False)
+                cb = ctk.CTkCheckBox(
+                    opt_frame, text="", variable=cb_var,
+                    checkbox_width=18, checkbox_height=18,
+                    checkmark_color="#000000", fg_color=COLOR_DANGER,
+                    border_color=COLOR_BORDER,
+                )
+                cb.grid(row=0, column=0, padx=12, pady=10)
+                self._checkboxes[key] = cb
+
+                ctk.CTkLabel(
+                    opt_frame, text=app["display"],
+                    font=("Segoe UI", 11, "bold"), text_color=COLOR_TEXT,
+                ).grid(row=0, column=1, padx=8, pady=(8, 2), sticky="w")
+                ctk.CTkLabel(
+                    opt_frame,
+                    text="Se puede reinstalar desde la Microsoft Store.",
+                    font=FONT_SMALL, text_color=COLOR_MUTED,
+                ).grid(row=1, column=1, padx=8, pady=(0, 8), sticky="w")
+                row_i += 1
+
+    # ─── SECCIÓN PRIVACIDAD ──────────────────────────────────────────────────
+    def _build_privacy_section(self) -> None:
+        """Sección de privacidad: telemetría, Recall, Copilot, activity history."""
+        frame = self._make_section_frame("privacy")
+
+        ctk.CTkLabel(
+            frame,
+            text="Deshabilita el rastreo, telemetría y funciones de IA de Microsoft. "
+                 "Reduce el tráfico de red, la carga del antivirus y mejora la privacidad.",
+            font=FONT_BODY, text_color=COLOR_MUTED, wraplength=700,
+        ).grid(row=0, column=0, padx=20, pady=(16, 8), sticky="w")
+
+        for row_i, tweak in enumerate(PRIVACY_TWEAKS):
+            opt_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+            opt_frame.grid(row=row_i + 1, column=0, padx=20, pady=6, sticky="ew")
+            opt_frame.grid_columnconfigure(1, weight=1)
+
+            cb_var = ctk.BooleanVar(value=tweak.get("default", True))
+            cb = ctk.CTkCheckBox(
+                opt_frame, text="", variable=cb_var,
+                checkbox_width=20, checkbox_height=20,
+                checkmark_color="#000000", fg_color=COLOR_ACCENT,
+                border_color=COLOR_BORDER,
+            )
+            cb.grid(row=0, column=0, padx=16, pady=14)
+            self._checkboxes[tweak["key"]] = cb
+
+            ctk.CTkLabel(
+                opt_frame, text=tweak["display"],
+                font=("Segoe UI", 12, "bold"), text_color=COLOR_TEXT,
+            ).grid(row=0, column=1, padx=8, pady=(12, 4), sticky="w")
+            ctk.CTkLabel(
+                opt_frame, text=tweak["description"],
+                font=FONT_BODY, text_color=COLOR_MUTED, wraplength=600,
+            ).grid(row=1, column=1, padx=8, pady=(0, 12), sticky="w")
+
+    # ─── SECCIÓN STARTUP ─────────────────────────────────────────────────────
+    def _build_startup_section(self) -> None:
+        """Sección gestora de programas al inicio de Windows."""
+        frame = self._make_section_frame("startup")
+        frame.grid_columnconfigure(0, weight=1)
+
+        header = ctk.CTkFrame(frame, fg_color="transparent")
+        header.grid(row=0, column=0, padx=20, pady=(16, 8), sticky="ew")
+        header.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            header,
+            text="Gestiona qué programas se cargan al encender el PC. "
+                 "Deshabilitar los de alto impacto reduce el tiempo de arranque.",
+            font=FONT_BODY, text_color=COLOR_MUTED, wraplength=600,
+        ).grid(row=0, column=0, sticky="w")
+
+        ctk.CTkButton(
+            header, text="🔄  Actualizar lista",
+            font=FONT_BODY, fg_color=COLOR_ACCENT2, hover_color="#2563eb",
+            text_color=COLOR_TEXT, height=32, width=160,
+            command=self._refresh_startup_list,
+        ).grid(row=0, column=1, padx=(8, 0))
+
+        self._startup_list_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        self._startup_list_frame.grid(row=1, column=0, padx=20, pady=4, sticky="ew")
+        self._startup_list_frame.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            self._startup_list_frame,
+            text="⏳  Cargando lista de programas al inicio...",
+            font=FONT_BODY, text_color=COLOR_MUTED,
+        ).grid(row=0, column=0, pady=20)
+
+        ctk.CTkButton(
+            frame, text="🚀  Abrir Administrador de Tareas (Startup)",
+            font=FONT_SMALL, fg_color="#1e293b", hover_color="#334155",
+            text_color=COLOR_MUTED, height=28,
+            command=self.startup_mgr.open_task_manager_startup,
+        ).grid(row=2, column=0, padx=20, pady=(4, 16), sticky="w")
+
+        # Cargar lista automáticamente
+        self.after(500, self._refresh_startup_list)
+
+    def _refresh_startup_list(self) -> None:
+        """Recarga la lista de programas al inicio en un hilo."""
+        for widget in self._startup_list_frame.winfo_children():
+            widget.destroy()
+        ctk.CTkLabel(
+            self._startup_list_frame,
+            text="⏳  Cargando...", font=FONT_BODY, text_color=COLOR_MUTED,
+        ).grid(row=0, column=0, pady=20)
+
+        def _load():
+            items = self.startup_mgr.get_startup_items()
+            self.after(0, lambda: self._populate_startup_list(items))
+
+        threading.Thread(target=_load, daemon=True).start()
+
+    def _populate_startup_list(self, items: list) -> None:
+        """Renderiza la lista de startup items."""
+        for widget in self._startup_list_frame.winfo_children():
+            widget.destroy()
+
+        if not items:
+            ctk.CTkLabel(
+                self._startup_list_frame,
+                text="✅  No se encontraron programas de inicio adicionales.",
+                font=FONT_BODY, text_color=COLOR_SUCCESS,
+            ).grid(row=0, column=0, pady=20)
+            return
+
+        for i, item in enumerate(items):
+            row_frame = ctk.CTkFrame(self._startup_list_frame, fg_color=COLOR_CARD, corner_radius=8)
+            row_frame.grid(row=i, column=0, pady=3, sticky="ew")
+            row_frame.grid_columnconfigure(1, weight=1)
+
+            enabled = item.get("enabled", True)
+            status_color = COLOR_SUCCESS if enabled else COLOR_MUTED
+            status_icon = "●" if enabled else "○"
+
+            ctk.CTkLabel(
+                row_frame, text=status_icon, font=("Segoe UI", 14),
+                text_color=status_color, width=24,
+            ).grid(row=0, column=0, padx=12, pady=10)
+
+            ctk.CTkLabel(
+                row_frame, text=item.get("name", "?"),
+                font=("Segoe UI", 11, "bold"), text_color=COLOR_TEXT,
+            ).grid(row=0, column=1, padx=4, pady=(8, 2), sticky="w")
+            ctk.CTkLabel(
+                row_frame,
+                text=f"{item.get('publisher', '')}  ·  {item.get('location', '')}",
+                font=FONT_SMALL, text_color=COLOR_MUTED,
+            ).grid(row=1, column=1, padx=4, pady=(0, 8), sticky="w")
+
+            btn_text = "Deshabilitar" if enabled else "Habilitar"
+            btn_color = "#7c2d12" if enabled else "#0d3320"
+
+            def _make_toggle(it=item, en=enabled):
+                def _do():
+                    if en:
+                        self.startup_mgr.disable_item(it["name"], it.get("location", "HKCU_Run"))
+                    else:
+                        self.startup_mgr.enable_item(it["name"], it.get("location", "HKCU_Run"))
+                    self._refresh_startup_list()
+                return _do
+
+            ctk.CTkButton(
+                row_frame, text=btn_text, font=FONT_SMALL,
+                fg_color=btn_color, hover_color="#991b1b" if enabled else "#15803d",
+                text_color=COLOR_TEXT, height=26, width=100,
+                command=_make_toggle(),
+            ).grid(row=0, column=2, rowspan=2, padx=12, pady=10)
+
+    # ─── SECCIÓN PERFILES ────────────────────────────────────────────────────
+    def _build_profiles_section(self) -> None:
+        """Sección de perfiles de rendimiento: Gaming / Trabajo / Batería."""
+        frame = self._make_section_frame("profiles")
+        frame.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            frame,
+            text="Aplica un perfil completo en un clic: plan de energía, prioridad CPU, "
+                 "Game DVR, throttling de red y efectos visuales adaptados a cada uso.",
+            font=FONT_BODY, text_color=COLOR_MUTED, wraplength=700,
+        ).grid(row=0, column=0, padx=20, pady=(16, 8), sticky="w")
+
+        # Card de perfil activo
+        active_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        active_frame.grid(row=1, column=0, padx=20, pady=(4, 16), sticky="ew")
+        ctk.CTkLabel(active_frame, text="Perfil activo detectado:", font=FONT_SMALL, text_color=COLOR_MUTED).pack(side="left", padx=16, pady=12)
+        self._profile_active_lbl = ctk.CTkLabel(active_frame, text="Calculando...", font=FONT_BODY, text_color=COLOR_ACCENT)
+        self._profile_active_lbl.pack(side="left", padx=4)
+        self.after(800, self._refresh_active_profile)
+
+        profile_colors = {"gaming": COLOR_DANGER, "work": COLOR_ACCENT2, "laptop": COLOR_SUCCESS}
+        profile_methods = {
+            "gaming": self.profiles_mgr.apply_gaming_profile,
+            "work": self.profiles_mgr.apply_work_profile,
+            "laptop": self.profiles_mgr.apply_laptop_profile,
+        }
+
+        for row_i, (pid, pdata) in enumerate(PROFILES.items()):
+            card = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=12)
+            card.grid(row=row_i + 2, column=0, padx=20, pady=8, sticky="ew")
+            card.grid_columnconfigure(1, weight=1)
+
+            color = profile_colors.get(pid, COLOR_ACCENT)
+            accent_bar = ctk.CTkFrame(card, fg_color=color, width=6, corner_radius=3)
+            accent_bar.grid(row=0, column=0, rowspan=2, padx=(12, 8), pady=16, sticky="ns")
+
+            ctk.CTkLabel(
+                card, text=pdata["name"],
+                font=("Segoe UI", 14, "bold"), text_color=COLOR_TEXT,
+            ).grid(row=0, column=1, padx=8, pady=(14, 4), sticky="w")
+            ctk.CTkLabel(
+                card, text=pdata["description"],
+                font=FONT_BODY, text_color=COLOR_MUTED, wraplength=540,
+            ).grid(row=1, column=1, padx=8, pady=(0, 14), sticky="w")
+
+            def _make_apply(method=profile_methods[pid], name=pdata["name"]):
+                def _do():
+                    self._update_progress(f"Aplicando perfil {name}...", 0)
+                    threading.Thread(target=lambda: self._apply_profile(method, name), daemon=True).start()
+                return _do
+
+            ctk.CTkButton(
+                card, text="Aplicar",
+                font=("Segoe UI", 11, "bold"),
+                fg_color=color, hover_color=color,
+                text_color="#000000" if pid != "work" else "#ffffff",
+                height=36, width=90,
+                command=_make_apply(),
+            ).grid(row=0, column=2, rowspan=2, padx=16, pady=16)
+
+    def _apply_profile(self, method, name: str) -> None:
+        """Aplica un perfil en hilo separado."""
+        ok, fail = method()
+        self.after(0, lambda: self._notify(
+            f"Perfil {name}",
+            f"Perfil '{name}' aplicado — {ok} ajustes exitosos, {fail} errores.",
+            "info" if fail == 0 else "warning",
+        ))
+        self.after(0, self._refresh_active_profile)
+        self._update_progress(f"✅ Perfil {name} aplicado.", 100)
+
+    def _refresh_active_profile(self) -> None:
+        """Actualiza el label del perfil activo."""
+        def _load():
+            name = self.profiles_mgr.get_active_profile_name()
+            self.after(0, lambda: self._profile_active_lbl.configure(text=name))
+        threading.Thread(target=_load, daemon=True).start()
+
+    # ─── SECCIÓN TEMPERATURA ─────────────────────────────────────────────────
+    def _build_temperature_section(self) -> None:
+        """Sección monitor de temperatura CPU/GPU con detección de throttling."""
+        frame = self._make_section_frame("temperature")
+        frame.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            frame,
+            text="El throttling térmico es la causa #1 de lentitud en laptops. "
+                 "Cuando el CPU supera los 90°C, Windows reduce su velocidad automáticamente.",
+            font=FONT_BODY, text_color=COLOR_MUTED, wraplength=700,
+        ).grid(row=0, column=0, padx=20, pady=(16, 8), sticky="w")
+
+        # Cards de temperatura
+        cards_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        cards_frame.grid(row=1, column=0, padx=20, pady=8, sticky="ew")
+        cards_frame.grid_columnconfigure((0, 1, 2), weight=1)
+
+        for col, (label, key, icon) in enumerate([
+            ("CPU", "cpu_temp_lbl", "🔵"),
+            ("GPU", "gpu_temp_lbl", "🟢"),
+            ("Estado", "throttle_lbl", "⚡"),
+        ]):
+            card = ctk.CTkFrame(cards_frame, fg_color=COLOR_CARD, corner_radius=12)
+            card.grid(row=0, column=col, padx=6, pady=4, sticky="ew")
+            ctk.CTkLabel(card, text=f"{icon}  {label}", font=FONT_SMALL, text_color=COLOR_MUTED).pack(pady=(12, 4))
+            lbl = ctk.CTkLabel(card, text="—", font=("Segoe UI", 22, "bold"), text_color=COLOR_MUTED)
+            lbl.pack(pady=(0, 12))
+            self._temp_widgets[key] = lbl
+
+        # Consejo
+        advice_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        advice_frame.grid(row=2, column=0, padx=20, pady=8, sticky="ew")
+        ctk.CTkLabel(advice_frame, text="💡  Consejo:", font=FONT_SMALL, text_color=COLOR_MUTED).pack(anchor="w", padx=16, pady=(12, 4))
+        self._temp_widgets["advice_lbl"] = ctk.CTkLabel(
+            advice_frame, text="Iniciando monitor...",
+            font=FONT_BODY, text_color=COLOR_TEXT, wraplength=660,
+        )
+        self._temp_widgets["advice_lbl"].pack(anchor="w", padx=16, pady=(0, 12))
+
+        # Botones
+        btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        btn_frame.grid(row=3, column=0, padx=20, pady=8, sticky="w")
+
+        ctk.CTkButton(
+            btn_frame, text="▶  Iniciar Monitor",
+            font=FONT_BODY, fg_color=COLOR_SUCCESS, hover_color="#059669",
+            text_color="#000000", height=36,
+            command=lambda: self.temp_monitor.start(),
+        ).pack(side="left", padx=4)
+
+        ctk.CTkButton(
+            btn_frame, text="■  Parar",
+            font=FONT_BODY, fg_color="#374151", hover_color="#4b5563",
+            text_color=COLOR_TEXT, height=36,
+            command=lambda: self.temp_monitor.stop(),
+        ).pack(side="left", padx=4)
+
+    # ─── SECCIÓN AUTO-LIMPIEZA ────────────────────────────────────────────────
+    def _build_autoclean_section(self) -> None:
+        """Sección para programar limpiezas automáticas."""
+        frame = self._make_section_frame("autoclean")
+        frame.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            frame,
+            text="Programa limpiezas automáticas que se ejecutan en segundo plano "
+                 "sin que tengas que abrir la app. Windows Task Scheduler se encarga.",
+            font=FONT_BODY, text_color=COLOR_MUTED, wraplength=700,
+        ).grid(row=0, column=0, padx=20, pady=(16, 8), sticky="w")
+
+        # Estado de tareas programadas
+        status_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        status_frame.grid(row=1, column=0, padx=20, pady=8, sticky="ew")
+        ctk.CTkLabel(status_frame, text="📋  Tareas programadas activas:", font=FONT_HEADING, text_color=COLOR_TEXT).pack(anchor="w", padx=16, pady=(12, 8))
+        self._autoclean_status_lbl = ctk.CTkLabel(
+            status_frame, text="Verificando...",
+            font=FONT_BODY, text_color=COLOR_MUTED,
+        )
+        self._autoclean_status_lbl.pack(anchor="w", padx=16, pady=(0, 12))
+
+        # Botones de programación
+        sched_frame = ctk.CTkFrame(frame, fg_color=COLOR_CARD, corner_radius=10)
+        sched_frame.grid(row=2, column=0, padx=20, pady=8, sticky="ew")
+
+        ctk.CTkLabel(sched_frame, text="⏱  Programar limpieza:", font=FONT_HEADING, text_color=COLOR_TEXT).pack(anchor="w", padx=16, pady=(12, 8))
+
+        btn_row = ctk.CTkFrame(sched_frame, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(0, 12))
+
+        ctk.CTkButton(
+            btn_row, text="📅  Semanal (domingos 3 AM)",
+            font=FONT_BODY, fg_color=COLOR_ACCENT2, hover_color="#2563eb",
+            text_color=COLOR_TEXT, height=36,
+            command=self._schedule_weekly_clean,
+        ).pack(side="left", padx=4)
+
+        ctk.CTkButton(
+            btn_row, text="📆  Mensual (día 1, 4 AM)",
+            font=FONT_BODY, fg_color="#374151", hover_color="#4b5563",
+            text_color=COLOR_TEXT, height=36,
+            command=self._schedule_monthly_clean,
+        ).pack(side="left", padx=4)
+
+        ctk.CTkButton(
+            btn_row, text="🧹  Limpiar ahora",
+            font=FONT_BODY, fg_color=COLOR_SUCCESS, hover_color="#059669",
+            text_color="#000000", height=36,
+            command=self._run_cleanup_now,
+        ).pack(side="left", padx=4)
+
+        ctk.CTkButton(
+            btn_row, text="🗑  Eliminar tareas",
+            font=FONT_BODY, fg_color="#7c2d12", hover_color="#991b1b",
+            text_color=COLOR_TEXT, height=36,
+            command=self._remove_autoclean_tasks,
+        ).pack(side="left", padx=4)
+
+        self.after(600, self._refresh_autoclean_status)
+
+    def _refresh_autoclean_status(self) -> None:
+        def _load():
+            status = self.autoclean_mgr.get_task_status()
+            lines = []
+            if status.get("weekly_exists"):
+                lines.append(f"✅  Semanal activa — próximo: {status.get('weekly_next_run', '?')}")
+            else:
+                lines.append("○  Sin tarea semanal")
+            if status.get("monthly_exists"):
+                lines.append(f"✅  Mensual activa — próximo: {status.get('monthly_next_run', '?')}")
+            else:
+                lines.append("○  Sin tarea mensual")
+            self.after(0, lambda: self._autoclean_status_lbl.configure(text="\n".join(lines)))
+        threading.Thread(target=_load, daemon=True).start()
+
+    def _schedule_weekly_clean(self) -> None:
+        threading.Thread(target=lambda: (
+            self.autoclean_mgr.create_weekly_task(),
+            self.after(0, self._refresh_autoclean_status),
+            self.after(0, lambda: self._notify("Auto-limpieza", "Tarea semanal programada para domingos a las 3:00 AM.", "info"))
+        ), daemon=True).start()
+
+    def _schedule_monthly_clean(self) -> None:
+        threading.Thread(target=lambda: (
+            self.autoclean_mgr.create_monthly_task(),
+            self.after(0, self._refresh_autoclean_status),
+            self.after(0, lambda: self._notify("Auto-limpieza", "Tarea mensual programada para el día 1 de cada mes a las 4:00 AM.", "info"))
+        ), daemon=True).start()
+
+    def _run_cleanup_now(self) -> None:
+        self._update_progress("Ejecutando limpieza ahora...", 0)
+        threading.Thread(target=lambda: (
+            self.autoclean_mgr.run_cleanup_now(),
+            self.after(0, lambda: self._notify("Limpieza", "Limpieza completada.", "info"))
+        ), daemon=True).start()
+
+    def _remove_autoclean_tasks(self) -> None:
+        threading.Thread(target=lambda: (
+            self.autoclean_mgr.remove_task("WinOptimizer_WeeklyCleanup"),
+            self.autoclean_mgr.remove_task("WinOptimizer_MonthlyCleanup"),
+            self.after(0, self._refresh_autoclean_status),
+            self.after(0, lambda: self._notify("Auto-limpieza", "Tareas programadas eliminadas.", "info"))
+        ), daemon=True).start()
+
     def _build_visual_section(self) -> None:
         frame = self._make_section_frame("visual")
 
@@ -1599,6 +2111,12 @@ class WinOptimizerApp(ctk.CTk):
             "network": "🌐  Optimización de Red",
             "browser": "🖥  Optimización de Navegadores",
             "visual": "👁  Efectos Visuales",
+            "debloat": "🗑  Eliminar Bloatware",
+            "privacy": "🔒  Privacidad y Telemetría",
+            "startup": "🚀  Gestor de Programas al Inicio",
+            "profiles": "⚡  Perfiles de Rendimiento",
+            "temperature": "🌡  Monitor de Temperatura",
+            "autoclean": "⏱  Limpieza Automática Programada",
             "log": "📋  Historial de Cambios",
             "ai": "🤖  Asistente IA",
         }
@@ -1927,6 +2445,29 @@ class WinOptimizerApp(ctk.CTk):
                 )
                 ok2, out2, _ = _ps.run(_script)
                 total_ok += 1 if ok2 else 0
+
+            # 7. Debloat
+            selected_bloat = [
+                key.replace("dbl_", "")
+                for key, cb in self._checkboxes.items()
+                if key.startswith("dbl_") and cb.get() == 1
+            ]
+            if selected_bloat:
+                self._update_progress("Eliminando bloatware...", 88)
+                self.debloat_mgr.remove_selected(selected_bloat)
+                total_ok += len(selected_bloat)
+
+            # 7b. Privacidad
+            selected_prv = [
+                key.replace("prv_", "")
+                for key, cb in self._checkboxes.items()
+                if key.startswith("prv_") and cb.get() == 1
+            ]
+            if selected_prv:
+                self._update_progress("Aplicando privacidad...", 91)
+                ok, fail = self.privacy_opt.optimize_all(selected_prv)
+                total_ok += ok
+                total_fail += fail
 
             # 8. Visual
             self._update_progress("Optimizando efectos visuales...", 94)
