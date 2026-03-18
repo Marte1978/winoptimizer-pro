@@ -90,8 +90,9 @@ class WinOptimizerApp(ctk.CTk):
 
         # Inicializar componentes
         self.tracker = ChangeTracker()
-        self.system_info = get_system_summary()
-        self.is_laptop = self._detect_laptop()
+        # system_info y laptop se cargan en background para no bloquear la UI
+        self.system_info: dict = {}
+        self.is_laptop: bool = False
         self._current_section = "dashboard"
         self._optimization_running = False
         self._backup_created = False
@@ -135,16 +136,37 @@ class WinOptimizerApp(ctk.CTk):
         self._temp_snapshot: dict = {}  # último snapshot de temperatura
         self._temp_widgets: dict = {}   # widgets del panel de temperatura
 
-        # Configurar ventana
+        # Configurar ventana (inmediato — sin bloquear)
         self._setup_window()
         self._build_ui()
         self._show_section("dashboard")
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        # Cargar info del sistema en background después de mostrar la ventana
+        threading.Thread(target=self._load_system_info_bg, daemon=True).start()
+
     def _on_close(self) -> None:
         """Limpia recursos antes de cerrar."""
         self._perf_monitor.stop()
         self.destroy()
+
+    def _load_system_info_bg(self) -> None:
+        """Carga info del sistema en background sin bloquear la UI."""
+        try:
+            info = get_system_summary()
+            laptop = self._detect_laptop()
+            self.system_info = info
+            self.is_laptop = laptop
+            # Actualizar la UI en el hilo principal
+            self.after(0, self._on_system_info_ready)
+        except Exception as e:
+            logger.warning(f"Error cargando info del sistema: {e}")
+
+    def _on_system_info_ready(self) -> None:
+        """Callback en hilo principal cuando system_info ya está disponible."""
+        # Refrescar sección activa si está en dashboard o compatible
+        if self._current_section in ("dashboard", "services", "power"):
+            self._show_section(self._current_section)
 
     def _detect_laptop(self) -> bool:
         """Detecta si el equipo es una laptop."""
